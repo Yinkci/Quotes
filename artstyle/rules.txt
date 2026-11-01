@@ -1,0 +1,7 @@
+# Extra rules added to every image prompt (one per line). Lines starting with # are ignored.
+# The art style itself is in style.txt; things never to draw are in avoid.txt.
+This is a background for a short quote reel: each image visualizes the meaning and feeling of its line of the quote, not a literal story.
+Be creative with WHAT is shown: a lone figure in a wide landscape, a couple, a close-up of hands or a face in shadow, an empty room, a road, a forest path, the sea, a window at night, a sky. Use visual metaphors that fit the words, and pick a different subject, place, time of day and color mood from the other images of this video.
+Be strict about HOW it is drawn: always the exact art style of the style examples (line work, grain, palette, shading), so every image looks like it comes from the same channel.
+Keep it simple and readable at a glance: one clear subject, lots of calm space around it.
+The caption will be placed over the middle of the image, so keep the center area calm (sky, water, a wall, a dark shadow); put the subject below or to the side of the center.
