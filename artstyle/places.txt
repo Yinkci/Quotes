@@ -1,0 +1,34 @@
+# Places a scene can be set in, one per line. Every generation picks a new one at random, never one another scene
+# of this video uses, so "Generate again" gives a different place each time.
+# Lines starting with "home:" are inside a home (used for at most 1 scene in 3). Lines starting with # are ignored.
+a quiet rooftop at dusk with water tanks and a city skyline behind
+an empty train platform in the countryside, rails stretching away
+inside a nearly empty train carriage, evening light through the windows
+a rainy street at night with a convenience store glowing on the corner
+a small seaside town road above the ocean at sunset
+a grassy hill with a single tree under a huge sky
+a narrow alley with hanging lanterns and old shop signs
+a bus stop on a lonely country road, fields all around
+a riverside embankment path with tall grass, a bridge in the distance
+a snowy mountain road with pine trees and distant peaks
+a sunflower field on a summer evening
+an old shrine path with stone steps and a red gate among trees
+a pedestrian bridge over a busy city road at night, car lights below
+a seaside breakwater with a small lighthouse
+an empty school classroom at sunset, chairs on desks
+a school rooftop with a chain-link fence and a wide sky
+a quiet coffee shop corner by a big window, rain outside
+a laundromat at night under flickering fluorescent lights
+a bicycle parked at a railroad crossing, the barrier down
+a field of autumn leaves in a park, a bench under a red maple
+a cliff above the ocean with wind in the grass
+an old library aisle with tall wooden shelves and warm light
+a quiet city park at night with a single street lamp
+a bookstore street in the evening, lit shop windows
+a ferry deck crossing the sea under a cloudy sky
+a starry night sky over a wide open field
+home: a small apartment balcony at night with plants and city lights
+home: a cozy bedroom with a desk lamp and posters, rain on the window
+home: a kitchen table in the early morning, steam from a cup of tea
+home: a window seat with cushions, snow falling outside
+home: an entryway with shoes by the door and soft hall light

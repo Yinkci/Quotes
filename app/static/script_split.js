@@ -1,8 +1,10 @@
 "use strict";
 /* Full-script import: split one pasted narration into per-scene scripts.
 
-   Two modes:
+   Three modes:
    - labeled:    "SCENE 1", "Scene 01:", "[Scene 1]", "Scene 1 — Apartment" headings decide the scenes.
+   - lines:      no labels, and the text is short lines (a quote, a poem): every line is its own scene,
+                 and scenes are added when there are more lines than scenes.
    - continuous: no labels; the text is divided into exactly N chronological parts using
                  paragraphs, sentences and an estimate of speaking time. This is an ESTIMATE —
                  the images are not analysed.
@@ -17,6 +19,7 @@ const ScriptSplit = (() => {
   const LABEL_LINE = /^\s*(?:narration|script|voice\s?over|vo)\s*:\s*/i;
   // Boundary costs: lower = more natural place to cut between two scenes.
   const PENALTY = { paragraph: 0, sentence: 0.12, clause: 0.9, word: 2.5 };
+  const LINE_WORDS = 30;     // a longer line is a prose paragraph, not a one-scene line
 
   const words = (t) => (t || "").split(/\s+/).filter(Boolean);
   const squash = (t) => (t || "").replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").trim();
@@ -185,8 +188,11 @@ const ScriptSplit = (() => {
     const isLabeled = labeled.sections.length > 0;
     const body = isLabeled ? labeled.sections.map((s) => s.text).join("\n\n") : stripWrappingQuotes(text);
     const paragraphs = body.split(/\n\s*\n/).filter((p) => p.trim()).length;
+    // One scene per line: at least two lines, none of them a long paragraph.
+    const lines = body.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+    const byLine = !isLabeled && lines.length > 1 && lines.every((l) => words(l).length <= LINE_WORDS);
     return { labeled: isLabeled, sections: labeled.sections, preamble: labeled.preamble,
-      words: words(body).length, paragraphs, body };
+      words: words(body).length, paragraphs, body, lines: byLine ? lines : null };
   }
 
   /* Returns {mode, parts[], notes[], warnings[], boundaries[], titles[], extra}.
@@ -223,6 +229,16 @@ const ScriptSplit = (() => {
       if (added > 0) warnings.push(`${added} new scene${added === 1 ? "" : "s"} (${sceneCount + 1}${added > 1 ? `–${parts.length}` : ""}) will be added without an image — use 🎨 Generate missing to make ${added === 1 ? "its image" : "their images"}.`);
       if (a.preamble) warnings.push(`Text before the first scene label is not assigned: “${a.preamble.slice(0, 80)}${a.preamble.length > 80 ? "…" : ""}”`);
       return { mode: "labeled", parts, titles, boundaries: [], warnings, analysis: a };
+    }
+    if (a.lines) {
+      // Every line is a scene; scenes past the last line are cleared so no old narration is left in them.
+      const parts = a.lines.slice(), spare = sceneCount - a.lines.length;
+      while (parts.length < sceneCount) parts.push("");
+      if (spare > 0) warnings.push(`Your script has ${a.lines.length} lines but the project has ${sceneCount} scenes: ` +
+        `scene${spare === 1 ? "" : "s"} ${a.lines.length + 1}${spare > 1 ? `–${sceneCount}` : ""} will have no narration (delete ${spare === 1 ? "it" : "them"} if not needed).`);
+      const added = a.lines.length - sceneCount;
+      if (added > 0) warnings.push(`${added} new scene${added === 1 ? "" : "s"} will be added without an image — use 🎨 Generate missing to make ${added === 1 ? "its image" : "their images"}.`);
+      return { mode: "lines", parts, titles: parts.map(() => ""), boundaries: parts.slice(1).map(() => "line"), warnings, analysis: a };
     }
     if (sceneCount < 1) return { mode: "continuous", parts: [], titles: [], boundaries: [], warnings: ["Add your scene images first — the script is divided across them."], analysis: a };
     const d = distributeContinuous(a.body, sceneCount);

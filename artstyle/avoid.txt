@@ -1,9 +1,10 @@
 # Things never to draw, one per line (replaces the built-in list). Lines starting with # are ignored.
 # Delete this file to go back to the built-in list.
-any text, letters, words, captions, subtitles, quotes, usernames, @handles, logos or watermarks (the style examples have a caption and a watermark burned in: never copy them)
+any text, letters, words, captions, subtitles, quotes, usernames, @handles, logos or watermarks
 photorealism, photographs or 3D render
-chibi, cartoony or exaggerated anime faces, big shiny anime eyes
-glossy, smooth or plastic digital look without grain
+modern glossy digital anime look: smooth airbrushed shading, glowing lens flares, sparkly bloom, ultra-detailed rendering
+chibi or exaggerated cartoon faces, oversized sparkly modern anime eyes
+clean, flat digital look without the aged print / paper grain
 neon colors, oversaturated or candy colors
 busy, cluttered backgrounds
 big dramatic action poses, violence, blood or horror

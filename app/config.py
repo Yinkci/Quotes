@@ -20,6 +20,8 @@ PROJECTS_DIR = ROOT / "projects"
 EXPORTS_DIR = ROOT / "exports"
 ARTSTYLE_DIR = ROOT / "artstyle"      # images here = the art style for generated scene images
 LUTS_DIR = ROOT / "luts"              # built-in color grades: every .cube here is a Look (this PC only)
+SOUNDS_DIR = ROOT / "sounds"          # built-in sound effects (the intro sound)
+OVERLAYS_DIR = ROOT / "overlays"      # built-in overlays (the animated radio)
 
 for d in (MEDIA_DIR, WORKSPACE, PROJECTS_DIR, EXPORTS_DIR, ARTSTYLE_DIR, LUTS_DIR):
     d.mkdir(exist_ok=True)

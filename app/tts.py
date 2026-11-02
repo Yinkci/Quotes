@@ -746,11 +746,11 @@ class Narrator:
 
     def scene(self, script, voice, speed, sentence_gap=0.2, words_per_caption=5, cancelled=None, style="story",
               around=("", ""), last_unit=None):
-        """Narration for one scene. Returns (audio, captions, sentences_synthesized).
+        """Narration for one scene. Returns (audio, captions, sentences_synthesized, (start, end) of its last word).
         around = (text of the scene before, text of the scene after): context only, not spoken, so the
         scenes flow like one reading and the last line of the video sounds like an ending.
         last_unit = (audio, times) to use for the scene's last sentence (from final_sentence)."""
-        parts, captions, t, fresh = [], [], 0.0, 0
+        parts, captions, t, fresh, last_word = [], [], 0.0, 0, None
         poem = parse_style(style)
         if poem:      # (line, pause before it): longer after a verse, never shorter than Sentence pause
             line_gap, verse_gap = max(sentence_gap, poem["line"]), max(sentence_gap, poem["verse"])
@@ -774,10 +774,11 @@ class Narrator:
                 parts.append(gap)
                 t += len(gap) / SAMPLE_RATE
             captions += build_captions(words, times, words_per_caption, offset=t)
+            last_word = (t + times[-1][0], t + times[-1][1]) if times else None
             parts.append(audio)
             t += len(audio) / SAMPLE_RATE
         audio = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
-        return audio, captions, fresh
+        return audio, captions, fresh, last_word
 
 
 FINAL_TAKES = 2       # ElevenLabs tries for the video's last sentence (the 2nd only when the 1st ends rising)

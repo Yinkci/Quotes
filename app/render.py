@@ -13,6 +13,7 @@ import math
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -21,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from .config import CONFIG, EXPORTS_DIR, LUTS_DIR, MY_DEFAULTS_FILE, WORKSPACE
+from .config import CONFIG, EXPORTS_DIR, LUTS_DIR, MY_DEFAULTS_FILE, OVERLAYS_DIR, SOUNDS_DIR, WORKSPACE
 from .tts import SAMPLE_RATE, Cancelled, ElevenLabs
 from .captions import split_sentences, write_ass
 from . import recording
@@ -56,7 +57,8 @@ DEFAULT_SETTINGS = {
     "subtitles": {"enabled": True, "font": "Arial Black", "size": 84, "color": "#FFFFFF",
                   "outline_color": "#000000", "outline": 6, "shadow": 2, "bold": True, "italic": False,
                   "uppercase": False, "position": 26, "position_x": 50, "max_width": 84,
-                  "words_per_caption": 5},
+                  "words_per_caption": 5,
+                  "first_at_start": True},     # the first caption is on screen from the first frame (the hook)
     "imagegen": {"style": "", "no_text": True, "references": [], "continuity": True,
                  "places": "new"},        # "new": every scene is a different place; "story": stay until the story moves
     "story": {"continues_from": "",        # project file of the episode this one continues
@@ -65,6 +67,16 @@ DEFAULT_SETTINGS = {
                   "opacity": 70, "outline": 2, "outline_color": "#000000", "shadow": 1, "bold": True, "italic": False,
                   "anchor": "br", "position_x": 96, "position_y": 96},
     "music": {"enabled": False, "file": "", "name": "", "volume": 15, "duck": True, "fade_out": 2.0},
+    # A sound at the very start of the video (default: pressing Play on a cassette). The voice starts
+    # voice_at s into it (0.7: right after the click; the rest of it plays on under the voice), or when it
+    # ends if that's sooner. length (s) is only for the app's duration estimates. tape: the cassette keeps
+    # running (hiss, motor) under the whole video after it.
+    "intro": {"enabled": False, "file": str(SOUNDS_DIR / "cassette_play.wav"), "name": "Cassette play",
+              "volume": 70, "length": 2.4, "voice_at": 0.7, "tape": True},
+    # A picture on top of the whole video, under the captions (default: the animated radio cassette GIF,
+    # looping). size = % of the video width; position_x / position_y = where its center is, % of the frame.
+    "overlay": {"enabled": False, "file": str(OVERLAYS_DIR / "radio_cassette.gif"), "name": "Radio cassette",
+                "size": 60, "position_x": 50, "position_y": 16, "opacity": 100},
     # Color grade over the whole video: a built-in Look (luts/<look>.cube), or your own .cube file (lut wins).
     "color": {"look": DEFAULT_LOOK, "lut": "", "lut_name": "", "strength": 100},
     "motion": {"fit": "contain"},      # images are always static; only how they fit the frame is a choice
@@ -222,11 +234,17 @@ def validate(project):
             problems.append("Background music is on but no music file is chosen (Settings → Background music).")
         elif not Path(music["file"]).is_file():
             problems.append(f"Background music file not found ({Path(music['file']).name}). Choose it again.")
+    intro = merged_settings(project)["intro"]
+    if intro["enabled"] and not rec and not Path(intro["file"] or "").is_file():
+        problems.append("The intro sound file was not found. Choose it again (Settings → Intro sound).")
+    overlay = merged_settings(project)["overlay"]
+    if overlay["enabled"] and not Path(overlay["file"] or "").is_file():
+        problems.append("The overlay picture was not found. Choose it again (Settings → Overlay).")
     if problems:
         raise RenderError("\n".join(problems))
 
 
-def scene_audio_key(script, settings, around=("", ""), final=None):
+def scene_audio_key(script, settings, around=("", ""), final=None, settled=False):
     v, t = settings["voice"], settings["timing"]
     parts = [v["voice"], round(float(v["speed"]), 3), float(t["sentence_pause"]), script]
     if v.get("style", "story") != "story":       # left out for storytelling so existing caches stay valid
@@ -237,6 +255,8 @@ def scene_audio_key(script, settings, around=("", ""), final=None):
             parts.append(list(around))
         if final:                                # read as part of the video's last sentence (final_group)
             parts.append(["final", final])
+    if settled:                                  # the video's last word, settled down (settle_ending)
+        parts.append(["settled", SETTLE_DROP, SETTLE_STRETCH])
     raw = json.dumps(parts)
     return hashlib.sha1(raw.encode()).hexdigest()[:20]
 
@@ -261,7 +281,7 @@ def final_group(scenes):
         return None
     idx, frags, before = [last], [units(last)[0]], ""
     for k in reversed(said[:-1]):
-        if ends_sentence(scenes[k]["script"]):
+        if not runs_on(scenes[k]["script"]):
             break
         parts = units(k)
         idx.insert(0, k)
@@ -276,6 +296,46 @@ def final_group(scenes):
     return idx, frags, before
 
 
+# The video's last word: AI voices often lift the end of it, which sounds like more is coming. Its pitch glides
+# down by SETTLE_DROP semitones and it is stretched a little, so the voice lands (measured: "happy" went from
+# -2 -> 0 semitones at its end to -2 -> -4).
+SETTLE_DROP = 4.0
+SETTLE_STRETCH = 1.1
+
+
+def settle_ending(audio, word):
+    """`audio` with its word at `word` = (start, end) s gliding down in pitch and slowed a little (FFmpeg
+    rubberband, voice character kept). Everything before the word is untouched."""
+    sr, pre = SAMPLE_RATE, 0.3          # the 0.3 s before the word goes through too, then is cross-faded away
+    ws, we = word
+    start = max(0.0, ws - pre)
+    w0, w1 = ws - start, we - start
+    ramp = max(0.05, (w1 - w0) * 0.9)
+    cmds = [f"{w0:.3f} rubberband@rb tempo {1 / SETTLE_STRETCH:.4f};"]
+    cmds += [f"{t:.3f} rubberband@rb pitch {2 ** (-SETTLE_DROP * (t - w0) / ramp / 12):.4f};"
+             for t in np.arange(w0, w0 + ramp, 0.02)]
+    tmp = Path(tempfile.mkdtemp(prefix="settle_"))
+    try:
+        sf.write(str(tmp / "in.wav"), audio[int(start * sr):], sr)
+        (tmp / "cmds.txt").write_text("\n".join(cmds))
+        subprocess.run([CONFIG["ffmpeg"], "-y", "-v", "error", "-i", "in.wav", "-af",
+                        "asendcmd=f=cmds.txt,rubberband@rb=tempo=1:pitch=1:formant=preserved:pitchq=quality",
+                        "out.wav"], check=True, cwd=str(tmp), creationflags=NO_WINDOW)
+        out = sf.read(str(tmp / "out.wav"), dtype="float32")[0]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if out.ndim > 1:
+        out = out.mean(axis=1)
+    # 40 ms cross-fade from the original into the processed audio, ending 20 ms before the word starts
+    j, xf = int(start * sr) + int((w0 - 0.06) * sr), int(0.04 * sr)
+    k = j - int(start * sr)
+    if k < 0 or k + xf > len(out):
+        return audio
+    fade = np.linspace(0, 1, xf, dtype=np.float32)
+    mix = audio[j:j + xf] * (1 - fade) + out[k:k + xf] * fade
+    return np.concatenate([audio[:j], mix, out[k + xf:]]).astype(np.float32)
+
+
 def narrate(project, narrator, job, progress_span=(0.0, 1.0), only=None):
     """Generate (or load cached) narration for every scene (or just scene `only`). Returns per-scene dicts."""
     if recording.of(project):
@@ -287,6 +347,7 @@ def narrate(project, narrator, job, progress_span=(0.0, 1.0), only=None):
     # The last sentence is read in one go so it ends like an ending (ElevenLabs, storytelling style only).
     group = final_group(scenes) if eleven and s["voice"].get("style", "story") == "story" else None
     pieces = None
+    last_said = max((k for k, sc in enumerate(scenes) if (sc.get("script") or "").strip()), default=-1)
     out = []
     a, b = progress_span
     for i, scene in enumerate(scenes):
@@ -302,14 +363,20 @@ def narrate(project, narrator, job, progress_span=(0.0, 1.0), only=None):
                 if pieces is None:
                     pieces = narrator.final_sentence(group[1], voice, speed, group[2])
                 final = group[1]
-            audio, captions, fresh = narrator.scene(
+            audio, captions, fresh, last_word = narrator.scene(
                 scene["script"], voice, speed, float(s["timing"]["sentence_pause"]),
                 int(s["subtitles"]["words_per_caption"]), cancelled=job.cancelled,
                 style=s["voice"].get("style", "story"), around=around,
                 last_unit=pieces[group[0].index(i)] if final else None)
             if not len(audio):
                 raise RenderError(f"Scene {i + 1}: narration produced no audio. Check the script text.")
-            key = scene_audio_key(scene["script"], s, around, final)
+            # The video's last words: the voice settles down on the final word, like the end of a talk.
+            settled = i == last_said and not runs_on(script) and last_word is not None
+            key = scene_audio_key(scene["script"], s, around, final, settled)
+            if settled and not (AUDIO_DIR / f"{key}.wav").exists():
+                audio = settle_ending(audio, last_word)
+            elif settled:
+                audio = sf.read(str(AUDIO_DIR / f"{key}.wav"), dtype="float32")[0]
         else:   # image only: silence for the chosen length, no captions
             hold = max(0.5, float(s["timing"].get("silent_scene", 3.0)))
             audio, captions = np.zeros(int(round(hold * SAMPLE_RATE)), dtype=np.float32), []
@@ -349,6 +416,13 @@ def ends_sentence(script):
     return end.endswith((".", "!", "?")) and not end.endswith(("..", "…"))
 
 
+def runs_on(script):
+    """True when the scene visibly continues into the next one (a comma, dash, "..." at its end). A line
+    with no punctuation at all (a quote written one line per scene) is a line of its own."""
+    end = (script or "").rstrip().rstrip("\"'”’)")
+    return end.endswith((",", ";", ":", "—", "–", "-", "..", "…"))
+
+
 def build_timeline(project, narration):
     """Frame-exact scene durations, the full narration track and global caption events."""
     s = merged_settings(project)
@@ -356,8 +430,11 @@ def build_timeline(project, narration):
     t = s["timing"]
     lead_in = max(0.0, float(t["lead_in"]))
     n = len(narration)
-    scenes, frame = [], 0
     rec = recording.of(project)
+    intro = None if rec else intro_audio(s)
+    # The voice waits this long for the intro sound (right after the click, not the whole sound).
+    intro_len = min(len(intro) / SAMPLE_RATE, max(0.0, float(s["intro"].get("voice_at", 0.7))))         if intro is not None else 0.0
+    scenes, frame = [], 0
     if rec:      # the recording sets the clock: scenes start exactly where they start in it
         lead_in = 0.0
         edges = [0] + [round(item["rec_start"] * fps) for item in narration[1:]]
@@ -376,8 +453,9 @@ def build_timeline(project, narration):
         else:     # breathe after a finished sentence, move on quickly when the thought continues
             done = ends_sentence(project["scenes"][i].get("script"))
             tail = max(0.0, float(t["pause_sentence"] if done else t["pause_open"]))
-        frames = math.ceil((lead_in + item["speech"] + tail) * fps - 1e-6)
-        scenes.append({**item, "start_frame": frame, "frames": frames,
+        pre = lead_in + (intro_len if i == 0 else 0.0)
+        frames = math.ceil((pre + item["speech"] + tail) * fps - 1e-6)
+        scenes.append({**item, "start_frame": frame, "frames": frames, "pre": pre,
                        "start": frame / fps, "duration": frames / fps})
         frame += frames
     total_frames = frame
@@ -387,13 +465,16 @@ def build_timeline(project, narration):
     events = []
     for i, sc in enumerate(scenes):
         if track is not None:
-            at = int(round((sc["start"] + lead_in) * SAMPLE_RATE))
+            at = int(round((sc["start"] + sc["pre"]) * SAMPLE_RATE))
             track[at:at + len(sc["audio"])] = sc["audio"][:len(track) - at]
         visual_end = scenes[i + 1]["start"] if i < n - 1 else total
-        base = sc["rec_start"] if rec else sc["start"] + lead_in     # captions follow the recording's clock
+        base = sc["rec_start"] if rec else sc["start"] + sc["pre"]     # captions follow the recording's clock
         for c in sc["captions"]:
             events.append({"scene": i, "start": base + c["start"], "end": base + c["end"], "text": c["text"],
                            "limit": visual_end})
+    # The hook: the first caption is already there on the first frame, before the voice reaches it.
+    if events and s["subtitles"].get("first_at_start", True):
+        events[0]["start"] = 0.0
     # A caption stays on screen until the next one appears (also through a pause in the voice); the
     # last caption of a scene stays until the next scene starts (the video's end for the last).
     for j, ev in enumerate(events):
@@ -404,7 +485,7 @@ def build_timeline(project, narration):
             ev["end"] = min(ev["limit"], nxt["start"] if nxt else total)
         ev["end"] = max(ev["end"], ev["start"] + 0.2)
     return {"fps": fps, "scenes": scenes, "total": total, "total_frames": total_frames,
-            "track": track, "events": events,
+            "track": track, "events": events, "intro": intro,
             "audio_file": rec["file"] if rec else None}      # a recording is used as it is, at full quality
 
 
@@ -475,6 +556,15 @@ VOICE_EFFECTS = {
                                              "equalizer=f=400:t=q:w=2:g=3,equalizer=f=1600:t=q:w=3:g=-3,"
                                              "equalizer=f=3150:t=q:w=3:g=2,equalizer=f=5000:t=q:w=3:g=-18,"
                                              "highshelf=f=7000:t=q:w=0.7:g=-11"),
+    # Soft's curve first (no piercing top), then a milder Old Radio band: warm, a bit nostalgic, still clear.
+    "soft_radio": ("Soft + Old Radio", "highpass=f=100:poles=2,equalizer=f=190:t=q:w=1:g=-5,"
+                                       "equalizer=f=400:t=q:w=2:g=3,equalizer=f=1600:t=q:w=3:g=-3,"
+                                       "equalizer=f=3150:t=q:w=3:g=2,equalizer=f=5000:t=q:w=3:g=-18,"
+                                       "highshelf=f=7000:t=q:w=0.7:g=-11,"
+                                       "highpass=f=280:poles=2,highpass=f=280:poles=2,lowpass=f=4200:poles=2,"
+                                       "lowpass=f=4200:poles=2,equalizer=f=1200:t=q:w=0.8:g=2,"
+                                       "acompressor=threshold=0.15:ratio=2.5:attack=5:release=100,"
+                                       "asoftclip=type=atan:param=0.6"),
     "radio": ("Old Radio", "highpass=f=400:poles=2,highpass=f=400:poles=2,lowpass=f=3500:poles=2,lowpass=f=3500:poles=2,"
                            "equalizer=f=1200:t=q:w=0.8:g=3,acompressor=threshold=0.15:ratio=3:attack=5:release=100,"
                            "asoftclip=type=atan:param=1"),
@@ -545,6 +635,61 @@ def apply_voice_effect(src, dst, voice):
     finally:
         wet.unlink(missing_ok=True)
     return dst
+
+
+def intro_audio(s):
+    """The intro sound (mono, SAMPLE_RATE, at its volume), or None when it's off or missing."""
+    intro = s["intro"]
+    vol = max(0.0, min(100.0, float(intro["volume"]))) / 100
+    if not intro["enabled"] or not vol or not Path(intro["file"] or "").is_file():
+        return None
+    raw = subprocess.run([CONFIG["ffmpeg"], "-v", "error", "-i", str(intro["file"]), "-ac", "1",
+                          "-ar", str(SAMPLE_RATE), "-f", "f32le", "-"], capture_output=True, check=True,
+                         creationflags=NO_WINDOW).stdout
+    audio = np.frombuffer(raw, np.float32) * vol
+    return audio if len(audio) else None
+
+
+TAPE_FILE = SOUNDS_DIR / "cassette_run.wav"    # the tape running after Play: a seamless loop
+TAPE_XFADE = 0.7                                 # s: the loop comes in while the intro's own hiss fades out
+
+
+def tape_audio(s):
+    """The running-tape loop (mono, SAMPLE_RATE, at the intro volume), or None when it's off."""
+    intro = s["intro"]
+    if not intro.get("tape") or not TAPE_FILE.is_file():
+        return None
+    return intro_audio({"intro": {**intro, "file": str(TAPE_FILE)}})
+
+
+def add_intro(src, dst, intro, tape=None, fade_end=1.0):
+    """`src` (the finished narration) with the intro sound at its start, and the tape loop running from
+    the end of the intro to the end of the video (fading out over its last `fade_end` s). Returns dst."""
+    voice, sr = sf.read(str(src), dtype="float32")
+    n = min(len(voice), len(intro))
+    voice[:n] += intro[:n]
+    if tape is not None:
+        start = max(0, len(intro) - int(TAPE_XFADE * sr))
+        run = np.resize(tape, max(0, len(voice) - start))       # repeats the loop as often as needed
+        fin = min(len(run), int(TAPE_XFADE * sr))
+        run[:fin] *= np.sin(np.linspace(0, np.pi / 2, fin))
+        fout = min(len(run), int(max(0.1, fade_end) * sr))
+        run[len(run) - fout:] *= np.linspace(1, 0, fout)
+        voice[start:] += run
+    sf.write(str(dst), np.clip(voice, -0.98, 0.98), sr)
+    return dst
+
+
+def overlay_filters(video, src, ov, width, height, out):
+    """Put input `src` (a picture or looping GIF, transparency kept) over `video`: `size` % of the frame
+    width, centered at (position_x, position_y) % of the frame. Ends with the video. Output label [out]."""
+    w = max(2, round(width * max(1.0, min(100.0, float(ov["size"]))) / 100 / 2) * 2)
+    alpha = max(0.0, min(100.0, float(ov["opacity"]))) / 100
+    x = width * max(0.0, min(100.0, float(ov["position_x"]))) / 100
+    y = height * max(0.0, min(100.0, float(ov["position_y"]))) / 100
+    fade = f",colorchannelmixer=aa={alpha:.3f}" if alpha < 1 else ""
+    return [f"[{src}:v]format=rgba,scale={w}:-2:flags=lanczos{fade}[ovl]",
+            f"{video}[ovl]overlay=x={x:.1f}-w/2:y={y:.1f}-h/2:shortest=1:format=auto[{out}]"]
 
 
 def music_filters(nar, mus, music, total):
@@ -625,11 +770,20 @@ def render(project, narrator, job, preview):
             args += ["-i", str(clip)]
         narration = tl["audio_file"] or str(work / "narration.wav")
         narration = str(apply_voice_effect(narration, work / "narration_fx.wav", s["voice"]))   # voice effect, level-matched
-        args += ["-i", narration]
         music = s["music"]
         use_music = music["enabled"] and music["file"] and float(music["volume"]) > 0 and not tl["audio_file"]
+        if tl["intro"] is not None:      # added after the voice effect, so the sound stays as it is
+            narration = str(add_intro(narration, work / "narration_intro.wav", tl["intro"], tape_audio(s),
+                                      fade_end=float(music["fade_out"]) if use_music else 1.0))
+        args += ["-i", narration]
         if use_music:
             args += ["-stream_loop", "-1", "-i", str(music["file"])]      # loops for the whole video
+        ov = s["overlay"]
+        ov_input = None
+        if ov["enabled"] and Path(ov["file"] or "").is_file() and float(ov["opacity"]) > 0:
+            ov_input = n + 1 + (1 if use_music else 0)
+            loop = ["-ignore_loop", "0"] if Path(ov["file"]).suffix.lower() == ".gif" else ["-loop", "1"]
+            args += loop + ["-i", str(ov["file"])]       # a GIF keeps looping, a still picture stays
         # The color grade is applied to every scene clip before they are joined, ending in YUV again.
         grade = color_grade_filter(s["color"], work)
         parts = []
@@ -647,6 +801,9 @@ def render(project, narrator, job, preview):
         else:
             parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vc]")
             last = "vc"
+        if ov_input is not None:     # on top of the pictures, under the captions
+            parts += overlay_filters(f"[{last}]", ov_input, ov, width, height, "vov")
+            last = "vov"
         sub_filter = "ass=subs.ass," if burn else ""
         parts.append(f"[{last}]{sub_filter}scale=out_range=tv,format=yuv420p[out]")  # JPGs are full-range; output standard TV range
         audio_map = f"{n}:a"

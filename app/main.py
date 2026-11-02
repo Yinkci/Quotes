@@ -22,12 +22,13 @@ from .config import ARTSTYLE_DIR, CONFIG, MEDIA_DIR, MY_DEFAULTS_FILE, PROJECTS_
 from .render import (AUDIO_DIR, DEFAULT_SETTINGS, PREVIEW_DIR, VOICE_EFFECTS, Job, RenderError,
                      build_timeline, cache_info, cleanup_cache, clear_video_cache, merged_settings,
                      apply_my_defaults, builtin_looks, defaults_from, lut_kind, narrate, render, scene_summary,
-                     trim_segments, apply_voice_effect, voice_master_tag)
+                     trim_segments, apply_voice_effect, intro_audio, voice_master_tag)
 from .tts import (ELEVEN_MODEL, ELEVEN_MODELS, SAMPLE_RATE, Cancelled, Cartesia, CartesiaError, ElevenLabs,
                   Narrator)
 
 STATIC = Path(__file__).resolve().parent / "static"
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
+OVERLAY_TYPES = {".gif", ".png", ".webp"}       # pictures that can go on top of the video (GIFs animate)
 AUDIO_TYPES = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus"}
 
 app = FastAPI(title="StoryCraft")
@@ -149,7 +150,7 @@ async def upload(files: list[UploadFile]):
 @app.get("/api/image")
 def image(path: str):
     p = Path(path)
-    if p.suffix.lower() not in IMAGE_TYPES or not p.is_file():
+    if p.suffix.lower() not in IMAGE_TYPES | OVERLAY_TYPES or not p.is_file():
         raise HTTPException(404, "Image not found")
     return FileResponse(p)
 
@@ -246,6 +247,9 @@ def scene_audio(body: dict):
     if not (scene.get("script") or "").strip():
         raise HTTPException(400, "This scene has no narration script yet.")
     single = {**project, "scenes": [scene]}
+    if index > 0:      # the intro sound only comes before the first scene
+        given = project.get("settings") or {}
+        single["settings"] = {**given, "intro": {**(given.get("intro") or {}), "enabled": False}}
     try:
         item = narrate(project, narrator, Job("scene"), only=index)[0]    # knows its neighbours (ElevenLabs context)
     except (RenderError, CartesiaError) as e:
@@ -261,7 +265,7 @@ def test_voice(body: dict):
     text = (body.get("text") or "").strip() or \
         "At 8:43 PM, the world was about to end. Unfortunately, you had absolutely no idea."
     try:
-        audio, _, _ = narrator.scene(text, voice, speed, style=body.get("style", "story"))
+        audio = narrator.scene(text, voice, speed, style=body.get("style", "story"))[0]
     except CartesiaError as e:
         raise HTTPException(400, str(e))
     model = ElevenLabs.model if str(voice).startswith("eleven:") else ""
@@ -709,6 +713,51 @@ def music_pick():
     if not target.exists():
         target.write_bytes(data)
     return {"path": str(target), "name": src.name}
+
+
+@app.post("/api/intro/pick")
+def intro_pick():
+    """Choose your own intro sound; a copy is kept in media/ like the music. Returns its length too."""
+    path = dialogs.ask("open", title="Choose an intro sound",
+                       filetypes=[["Audio", " ".join("*" + e for e in sorted(AUDIO_TYPES))]])
+    if not path:
+        return {"path": None}
+    src = Path(path)
+    if src.suffix.lower() not in AUDIO_TYPES:
+        raise HTTPException(400, "Choose an audio file: " + ", ".join(sorted(AUDIO_TYPES)))
+    data = src.read_bytes()
+    safe = re.sub(r"[^\w.\- ]", "_", src.name)
+    target = MEDIA_DIR / f"intro_{hashlib.sha1(data).hexdigest()[:16]}_{safe}"
+    if not target.exists():
+        target.write_bytes(data)
+    try:
+        audio = intro_audio({"intro": {"enabled": True, "file": str(target), "volume": 100}})
+    except subprocess.CalledProcessError:
+        audio = None
+    if audio is None:
+        raise HTTPException(400, "That audio file can't be read.")
+    if len(audio) / SAMPLE_RATE > 15:
+        raise HTTPException(400, "Choose a short sound (15 seconds or less): the voice waits until it ends.")
+    return {"path": str(target), "name": src.stem, "length": round(len(audio) / SAMPLE_RATE, 3)}
+
+
+@app.post("/api/overlay/pick")
+def overlay_pick():
+    """Choose a picture to put on top of the video (an animated GIF, or a PNG / WebP with transparency);
+    a copy is kept in media/ so the project still works if the original moves."""
+    path = dialogs.ask("open", title="Choose an overlay (GIF, PNG or WebP)",
+                       filetypes=[["Pictures", " ".join("*" + e for e in sorted(OVERLAY_TYPES))]])
+    if not path:
+        return {"path": None}
+    src = Path(path)
+    if src.suffix.lower() not in OVERLAY_TYPES:
+        raise HTTPException(400, "Choose a GIF, PNG or WebP picture.")
+    data = src.read_bytes()
+    safe = re.sub(r"[^\w.\- ]", "_", src.name)
+    target = MEDIA_DIR / f"overlay_{hashlib.sha1(data).hexdigest()[:16]}_{safe}"
+    if not target.exists():
+        target.write_bytes(data)
+    return {"path": str(target), "name": src.stem}
 
 
 @app.post("/api/defaults")

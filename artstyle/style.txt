@@ -1,11 +1,10 @@
 # The art style for every generated image (replaces the built-in flat-cartoon style).
 # Write it as plain sentences; lines are joined together. Lines starting with # are ignored.
 # Delete this file to go back to the built-in style.
-Lo-fi anime / webtoon illustration, like a still frame from a quiet, emotional animated film.
-Clean hand-drawn line work with confident dark outlines; shapes filled with flat color and one or two hard-edged shadow tones (cel shading), no soft airbrushed gradients on characters.
-A fine, even film grain and slight noise over the whole image, like a scanned print or an old film still; a little faded and matte.
-Muted, slightly desaturated palette with deep shadows: dusty navy and teal blues, deep forest greens, near-black, warm terracotta, rust red, peach and soft amber.
-Warm low sunlight or lamp light against cool blue-green shadow; long sharp-edged shadows and patches of light falling across ground, walls and people. Light rays through trees or windows are welcome.
-Backgrounds are simplified but atmospheric: big calm shapes of sky, water, hills, trees, streets and rooms, with only a few small details.
-People are drawn in a simple, attractive anime style: dark hair in clean clumps, minimal facial features, natural proportions, plain everyday or elegant clothes. They are often seen from behind, in profile or with the face partly turned away or hidden in shadow.
-Calm, still, wistful and reflective mood, intimate and honest rather than dramatic.
+Vintage 1990s anime film aesthetic, like a hand-painted cel frame from a late-80s / early-90s Japanese animated film or OVA.
+Hand-drawn cel animation: clean dark ink outlines, characters filled with flat colors and one or two hard-edged shadow tones (classic cel shading), no soft digital gradients on characters.
+Backgrounds are hand-painted like animation background art: simple poster-like shapes with painted texture, flat skies and walls, trees and leaves in painted clusters.
+An aged print / film texture over the whole image: visible paper grain, fine speckle and a slightly faded, matte, warm look, like an old film still or a vintage art print.
+Limited, muted palette: deep navy and indigo blues, dusky teal, near-black, burnt orange and rust red, warm amber, cream and soft peach. Strong warm-against-cool contrast, often a warm lamp, fire, window or sunset glow in a cool blue night or dusk.
+People are drawn in authentic 90s anime style: natural proportions, voluminous layered hair with sharp clumps and a few loose strands, almond-shaped eyes with a simple highlight, small nose and mouth, soft calm expressions; plain cozy clothes like knit sweaters, coats and loose shirts.
+Quiet, nostalgic, intimate mood: small everyday moments, lone figures in wide nature, cozy rooms at night, starry skies, autumn and winter landscapes.

@@ -62,6 +62,7 @@
       <div class="preview-box" id="previewBox">
         <div class="poster" id="poster">
           <img id="posterImg" alt="">
+          <img class="poster-overlay" id="posterOverlay" alt="" hidden draggable="false">
           <div class="poster-caption" id="posterCaption">the world was about to end.</div>
           <div class="poster-watermark" id="posterWatermark" hidden></div>
         </div>
@@ -172,6 +173,7 @@
           <label class="toggle"><input type="checkbox" id="sItalic"> Italic</label>
           <label class="toggle"><input type="checkbox" id="sUpper"> UPPERCASE</label>
         </div>
+        <label class="toggle"><input type="checkbox" id="sFirstAtStart"> Show the first caption right away (from the first frame)</label>
       </details>
 
 
@@ -206,6 +208,23 @@
         </div>
       </details>
 
+      <details open>
+        <summary>Overlay</summary>
+        <label class="toggle"><input type="checkbox" id="ovEnabled"> Show a picture on top of the video</label>
+        <div class="field"><label>Picture <span class="hint">GIFs keep animating · under the captions</span></label>
+          <div class="row ep-row"><span id="ovName" class="ep-name">Radio cassette</span>
+            <button class="btn sm" id="btnOverlayPick">Choose…</button>
+            <button class="icon-btn" id="btnOverlayReset" title="Back to the radio cassette" hidden>↺</button></div></div>
+        <div class="sub-group">
+          <div class="sub-group-head"><span>Position</span></div>
+          <div class="field"><label>X <span class="hint">0 = left · 100 = right</span></label><div class="slider-num"><input type="range" id="ovPosX" min="0" max="100" step="0.5"><input type="number" class="num" data-for="ovPosX" min="0" max="100" step="0.5"><span class="unit">%</span></div></div>
+          <div class="field"><label>Y <span class="hint">0 = top · 100 = bottom</span></label><div class="slider-num"><input type="range" id="ovPosY" min="0" max="100" step="0.5"><input type="number" class="num" data-for="ovPosY" min="0" max="100" step="0.5"><span class="unit">%</span></div></div>
+          <p class="muted small">Fine-tune with X / Y, or drag the picture on the preview.</p>
+        </div>
+        <div class="field"><label>Size <span class="hint">of the video width</span></label><div class="slider-num"><input type="range" id="ovSize" min="5" max="100" step="1"><input type="number" class="num" data-for="ovSize" min="5" max="100" step="1"><span class="unit">%</span></div></div>
+        <div class="field"><label>Opacity</label><div class="slider-num"><input type="range" id="ovOpacity" min="5" max="100" step="1"><input type="number" class="num" data-for="ovOpacity" min="5" max="100" step="1"><span class="unit">%</span></div></div>
+      </details>
+
       <details open class="tts-only">
         <summary>Background music</summary>
         <label class="toggle"><input type="checkbox" id="mEnabled"> Play background music</label>
@@ -218,6 +237,19 @@
         <div class="field"><label>Fade out at the end</label><div class="slider-num"><input type="range" id="mFade" min="0" max="10" step="0.5"><input type="number" class="num" data-for="mFade" min="0" max="10" step="0.5"><span class="unit">s</span></div></div>
         <label class="toggle"><input type="checkbox" id="mDuck"> Lower the music while the narrator speaks</label>
         <p class="muted small">Heard in Preview video and the exported MP4.</p>
+      </details>
+
+      <details open class="tts-only">
+        <summary>Intro sound</summary>
+        <label class="toggle"><input type="checkbox" id="iEnabled"> Play a sound before the voice starts</label>
+        <div class="field"><label>Sound <span class="hint">plays over the first image; the voice and music start after it</span></label>
+          <div class="row ep-row"><span id="iName" class="ep-name">Cassette play</span>
+            <button class="btn sm" id="btnIntroPick">Choose…</button>
+            <button class="icon-btn" id="btnIntroPlay" title="Listen">▶</button>
+            <button class="icon-btn" id="btnIntroReset" title="Back to the cassette sound" hidden>↺</button></div></div>
+        <div class="field"><label>Voice starts after <span class="hint">0.7 s = right after the click; the rest plays under the voice</span></label><div class="slider-num"><input type="range" id="iVoiceAt" min="0" max="5" step="0.1"><input type="number" class="num" data-for="iVoiceAt" min="0" max="5" step="0.1"><span class="unit">s</span></div></div>
+        <label class="toggle"><input type="checkbox" id="iTape"> Keep the cassette playing (tape hiss) under the whole video</label>
+        <div class="field"><label>Volume</label><div class="slider-num"><input type="range" id="iVolume" min="0" max="100" step="1"><input type="number" class="num" data-for="iVolume" min="0" max="100" step="1"><span class="unit">%</span></div></div>
       </details>
 
       <details>

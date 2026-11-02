@@ -114,7 +114,9 @@ function sceneDuration(index) {
   const m = s.music, musicOn = m.enabled && m.file && +m.volume > 0;     // the music fades out after the hold
   const tail = last ? Math.max(0.2, +s.timing.end_hold) + (musicOn ? Math.max(0, +m.fade_out) : 0)
     : Math.max(0, +(endsSentence(sc.script) ? s.timing.pause_sentence : s.timing.pause_open));
-  return Math.ceil((+s.timing.lead_in + n.speech + tail) * fps - 1e-6) / fps;
+  const io = s.intro, intro = index === 0 && io?.enabled && io.file && +io.volume > 0     // the voice waits this long
+    ? Math.min(+io.length || 0, Math.max(0, +(io.voice_at ?? 0.7))) : 0;
+  return Math.ceil((+s.timing.lead_in + intro + n.speech + tail) * fps - 1e-6) / fps;
 }
 
 function markDirty() {
@@ -443,14 +445,17 @@ const BIND = [
   ["sShadow", "subtitles", "shadow", "num", "oShadow", (v) => v],
   ["sPos", "subtitles", "position", "num"],
   ["sColor", "subtitles", "color"], ["sOutlineColor", "subtitles", "outline_color"],
-  ["sBold", "subtitles", "bold", "bool"], ["sItalic", "subtitles", "italic", "bool"], ["sUpper", "subtitles", "uppercase", "bool"],
+  ["sBold", "subtitles", "bold", "bool"], ["sItalic", "subtitles", "italic", "bool"], ["sUpper", "subtitles", "uppercase", "bool"], ["sFirstAtStart", "subtitles", "first_at_start", "bool"],
   ["wEnabled", "watermark", "enabled", "bool"], ["wText", "watermark", "text"], ["wFont", "watermark", "font"],
   ["wPosX", "watermark", "position_x", "num"], ["wPosY", "watermark", "position_y", "num"],
   ["wSize", "watermark", "size", "num"], ["wOpacity", "watermark", "opacity", "num"],
   ["wOutline", "watermark", "outline", "num", "oWOutline", (v) => v], ["wShadow", "watermark", "shadow", "num", "oWShadow", (v) => v],
   ["wColor", "watermark", "color"], ["wOutlineColor", "watermark", "outline_color"], ["wBold", "watermark", "bold", "bool"], ["wItalic", "watermark", "italic", "bool"],
   ["mEnabled", "music", "enabled", "bool"], ["mVolume", "music", "volume", "num"], ["mFade", "music", "fade_out", "num"],
-  ["mDuck", "music", "duck", "bool"], ["cStrength", "color", "strength", "num"],
+  ["mDuck", "music", "duck", "bool"], ["iEnabled", "intro", "enabled", "bool"], ["iVoiceAt", "intro", "voice_at", "num"], ["iTape", "intro", "tape", "bool"], ["iVolume", "intro", "volume", "num"],
+  ["ovEnabled", "overlay", "enabled", "bool"], ["ovPosX", "overlay", "position_x", "num"], ["ovPosY", "overlay", "position_y", "num"],
+  ["ovSize", "overlay", "size", "num"], ["ovOpacity", "overlay", "opacity", "num"],
+  ["cStrength", "color", "strength", "num"],
   ["sPauseSent", "timing", "pause_sentence", "num", "oPauseSent", sec], ["sPauseOpen", "timing", "pause_open", "num", "oPauseOpen", sec], ["sSentPause", "timing", "sentence_pause", "num", "oSentPause", sec],
   ["sLead", "timing", "lead_in", "num", "oLead", sec], ["sEnd", "timing", "end_hold", "num", "oEnd", sec],
   ["sSilent", "timing", "silent_scene", "num", "oSilent", sec],
@@ -468,6 +473,7 @@ function settingsToUI() {
   }
   updateExportUI();
   updateMusicUI();
+  updateIntroUI();
   updateLutUI();
   updateVoiceUI();
   $("#projectName").value = state.project.name || "";
@@ -678,6 +684,65 @@ function updateWatermarkPreview(scale) {
   el.style.textShadow = w.shadow ? `0 calc(${w.shadow * scale}cqh) calc(${w.shadow * scale}cqh) rgba(0,0,0,.5)` : "none";
 }
 
+/* ---------------------------------------------------------------- overlay (a picture on top, e.g. the radio GIF) */
+function updateOverlayPreview() {
+  const o = S().overlay, el = $("#posterOverlay");
+  $("#ovName").textContent = o.name || (o.file ? o.file.split(/[\\/]/).pop() : "No picture chosen");
+  $("#ovName").classList.toggle("set", !!o.file); $("#ovName").title = o.file || "";
+  $("#btnOverlayReset").hidden = o.file === STATUS.defaults.overlay.file;
+  el.hidden = !o.enabled || !o.file;
+  if (el.hidden) return;
+  const url = imgUrl(o.file);
+  if (el.dataset.src !== url) { el.src = url; el.dataset.src = url; }
+  el.style.left = `${o.position_x}%`;
+  el.style.top = `${o.position_y}%`;
+  el.style.width = `${o.size}%`;
+  el.style.opacity = o.opacity / 100;
+}
+function setOverlay(values) {
+  Object.assign(S().overlay, values);
+  for (const [id, section, key] of BIND) {
+    if (section !== "overlay" || !(key in values)) continue;
+    const el = $("#" + id);
+    if (el.type === "checkbox") el.checked = !!values[key]; else el.value = values[key];
+    syncNumber(id, values[key]);
+  }
+  updatePoster();
+  markDirty();
+}
+$("#btnOverlayPick").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/overlay/pick", {});
+    if (r.path) setOverlay({ file: r.path, name: r.name, enabled: true });
+  } catch (e) { showMessage("Can't use that picture", e.message); }
+});
+$("#btnOverlayReset").addEventListener("click", () => {
+  const d = STATUS.defaults.overlay;
+  setOverlay({ file: d.file, name: d.name });
+});
+(() => {
+  // Drag the overlay: its center follows the pointer.
+  const el = $("#posterOverlay");
+  let grab = null;
+  el.addEventListener("pointerdown", (e) => {
+    const r = el.getBoundingClientRect();
+    grab = { dx: r.left + r.width / 2 - e.clientX, dy: r.top + r.height / 2 - e.clientY };
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    e.preventDefault();
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!grab) return;
+    const box = $("#previewBox").getBoundingClientRect();
+    const clamp = (v) => Math.round(Math.min(100, Math.max(0, v)) * 2) / 2;
+    setOverlay({ position_x: clamp(((e.clientX + grab.dx - box.left) / box.width) * 100),
+      position_y: clamp(((e.clientY + grab.dy - box.top) / box.height) * 100) });
+  });
+  const end = () => { grab = null; el.classList.remove("dragging"); };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+})();
+
 /* ---------------------------------------------------------------- preview pane */
 /* Which scene the middle preview shows. Click a scene card or use ◀ ▶; with a rendered,
    up-to-date preview video, selecting a scene jumps the video to where that scene starts. */
@@ -799,6 +864,7 @@ function updatePoster() {
   cap.style.right = "auto";
   cap.style.bottom = `${s.position}%`;
   updateWatermarkPreview(scale);
+  updateOverlayPreview();
 }
 
 /* ASS "Fontsize" is the font's full line height (ascent + descent), CSS font-size is the em box.
@@ -832,7 +898,7 @@ function showPreview(url) {
 }
 
 /* Subtitle position: number boxes, drag on the preview, positioning mode. */
-const POSITION_IDS = ["sSize", "sPosX", "sPos", "sMaxW", "wPosX", "wPosY", "wSize", "wText"];
+const POSITION_IDS = ["sSize", "sPosX", "sPos", "sMaxW", "wPosX", "wPosY", "wSize", "wText", "ovPosX", "ovPosY", "ovSize"];
 let positioning = false;
 
 function syncNumber(id, v) {
@@ -881,8 +947,8 @@ function setPositioning(on) {
   btn.hidden = !state.preview.url;
   $("#posterHint").hidden = hasVideo;
   $("#posterHint").innerHTML = positioning
-    ? "Drag the caption or watermark, then render the preview again"
-    : "<b>Preview video</b> renders the real thing · drag the caption or watermark to move them";
+    ? "Drag the caption, watermark or overlay, then render the preview again"
+    : "<b>Preview video</b> renders the real thing · drag the caption, watermark or overlay to move them";
 }
 $("#btnPosition").addEventListener("click", () => setPositioning(!positioning));
 
@@ -1448,6 +1514,40 @@ $("#btnMusicPlay").addEventListener("click", () => {
 $("#mVolume").addEventListener("input", (e) => { musicPlayer.volume = Math.max(0, Math.min(1, +e.target.value / 100)); });
 $("#btnMusicClear").addEventListener("click", () => {
   Object.assign(S().music, { file: "", name: "", enabled: false });
+  settingsToUI(); markDirty();
+});
+
+/* ---- intro sound: plays over the first image, then the voice and the music start ---- */
+const introPlayer = new Audio();
+const builtinIntro = () => STATUS.defaults.intro;
+function updateIntroUI() {
+  const io = S().intro, name = $("#iName");
+  name.textContent = io.name || (io.file ? io.file.split(/[\\/]/).pop() : "No sound chosen");
+  name.classList.toggle("set", !!io.file); name.title = io.file || "";
+  $("#btnIntroReset").hidden = io.file === builtinIntro().file;
+  introPlayer.pause(); $("#btnIntroPlay").textContent = "▶";
+}
+introPlayer.addEventListener("ended", () => ($("#btnIntroPlay").textContent = "▶"));
+$("#btnIntroPick").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/intro/pick", {});
+    if (!r.path) return;
+    Object.assign(S().intro, { file: r.path, name: r.name, length: r.length, enabled: true });
+    settingsToUI(); markDirty();
+    toast(`Intro sound: ${r.name}`);
+  } catch (e) { showMessage("Can't use that sound", e.message); }
+});
+$("#btnIntroPlay").addEventListener("click", () => {
+  const io = S().intro;
+  if (!introPlayer.paused) { introPlayer.pause(); $("#btnIntroPlay").textContent = "▶"; return; }
+  introPlayer.src = `/api/music?path=${encodeURIComponent(io.file)}`;
+  introPlayer.volume = Math.max(0, Math.min(1, +io.volume / 100));
+  introPlayer.play().then(() => ($("#btnIntroPlay").textContent = "⏸"))
+    .catch(() => showMessage("Can't play the intro sound", "The sound file was not found. Choose it again."));
+});
+$("#btnIntroReset").addEventListener("click", () => {
+  const b = builtinIntro();
+  Object.assign(S().intro, { file: b.file, name: b.name, length: b.length });
   settingsToUI(); markDirty();
 });
 
@@ -2050,7 +2150,7 @@ ${n} ${done === 1 ? "was" : "were"} generated before this.`);
 
 /* ---------------------------------------------------------------- full script import */
 const fullScript = { result: null, parts: [], titles: [], boundaries: [], edited: new Set() };
-const BOUNDARY_LABEL = { paragraph: "paragraph break", sentence: "sentence break", clause: "splits a sentence at a comma",
+const BOUNDARY_LABEL = { line: "new line", paragraph: "paragraph break", sentence: "sentence break", clause: "splits a sentence at a comma",
   word: "splits between words", manual: "moved by you" };
 const EMPTY_ASSIGN = `<div class="empty-pairs">Paste your script, then click <b>Auto assign to scenes</b>.<br>Nothing changes in your project until you click Apply.</div>`;
 
@@ -2072,12 +2172,13 @@ function updateScriptStats() {
   if (!text.trim()) {
     $("#scriptStats").innerHTML = n
       ? `Your project has <b>${n}</b> scene${n === 1 ? "" : "s"}. Paste the full narration above.`
-      : `Your project has no scenes yet. Add your images first so the script can be divided across them.`;
+      : `Your project has no scenes yet. Paste a script with one line per scene, or add your images first so the script can be divided across them.`;
     return;
   }
   const a = ScriptSplit.analyse(text);
   const kind = a.labeled
     ? `<b>${a.sections.length}</b> labeled scene${a.sections.length === 1 ? "" : "s"} detected`
+    : a.lines ? `<b>${a.lines.length}</b> lines, so one scene per line`
     : `no scene labels, so it will be divided into <b>${n}</b> part${n === 1 ? "" : "s"} (one per image)`;
   $("#scriptStats").innerHTML = `<b>${a.words}</b> words · ${a.paragraphs} paragraph${a.paragraphs === 1 ? "" : "s"} · ${kind} · project has <b>${n}</b> image${n === 1 ? "" : "s"}`;
 }
@@ -2099,6 +2200,9 @@ $("#btnAutoAssign").addEventListener("click", () => {
   } else if (r.mode === "labeled") {
     note.className = "assign-note";
     note.textContent = "✓ Assigned by the scene labels in your script (SCENE 1 → scene 1, and so on). Headings are not spoken.";
+  } else if (r.mode === "lines") {
+    note.className = "assign-note";
+    note.textContent = "✓ One scene per line of your script (line 1 → scene 1, and so on).";
   } else {
     note.className = "assign-note estimate";
     note.textContent = "≈ Estimated split. Your script has no scene labels, so it was divided in order using paragraphs, sentences and estimated speaking time. "
@@ -2147,7 +2251,7 @@ function renderAssignments() {
       const b = document.createElement("div");
       b.className = "boundary";
       const kind = fullScript.boundaries[i - 1];
-      const uncertain = r.mode !== "labeled" && kind !== "paragraph" && kind !== "manual";
+      const uncertain = r.mode === "continuous" && kind !== "paragraph" && kind !== "manual";
       const label = r.mode === "labeled" && kind !== "manual" ? "scene label" : `${BOUNDARY_LABEL[kind] || "boundary"}${uncertain ? " · please check" : ""}`;
       b.innerHTML = `<button class="btn" title="Move the last sentence of scene ${i} down into scene ${i + 1}">▼ move down</button>
         <span class="label ${uncertain ? "uncertain" : ""}">${label}</span>

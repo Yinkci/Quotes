@@ -198,6 +198,11 @@ input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
   user-select: none; touch-action: none; cursor: grab; border-radius: 3px; }
 .poster-watermark:hover, .poster-watermark.dragging, .poster.positioning .poster-watermark { outline: 1.5px dashed rgba(90,209,196,.9); outline-offset: 3px; }
 .poster-watermark.dragging { cursor: grabbing; }
+.poster img.poster-overlay { position: absolute; height: auto; transform: translate(-50%, -50%); opacity: 1; background: none;
+  user-select: none; touch-action: none; cursor: grab; }
+.poster img.poster-overlay[hidden] { display: none; }
+.poster-overlay:hover, .poster-overlay.dragging, .poster.positioning .poster-overlay { outline: 1.5px dashed rgba(90,209,196,.9); outline-offset: 3px; }
+.poster-overlay.dragging { cursor: grabbing; }
 .wm-pos { display: flex; gap: 14px; align-items: flex-start; }
 .wm-xy { flex: 1; min-width: 0; }
 .anchor-grid { display: grid; grid-template-columns: repeat(3, 22px); gap: 4px; padding: 6px; border-radius: 8px;
