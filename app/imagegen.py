@@ -188,6 +188,25 @@ def _saved_image(thread, started):
     return files[0] if files else None
 
 
+def to_portrait(path, work):
+    """Center-crop an image to exact 9:16. The image tool sometimes ignores the requested size (e.g. 981x1602),
+    which would leave black bars in the video. Returns the cropped copy, or `path` if it is already 9:16."""
+    probe = subprocess.run([CONFIG["ffprobe"], "-v", "error", "-select_streams", "v:0", "-show_entries",
+                            "stream=width,height", "-of", "csv=p=0", str(path)],
+                           capture_output=True, text=True, creationflags=NO_WINDOW)
+    try:
+        w, h = (int(v) for v in probe.stdout.strip().split(",")[:2])
+    except ValueError:
+        return path
+    cw, ch = min(w, round(h * 9 / 16)), min(h, round(w * 16 / 9))
+    if w - cw <= 2 and h - ch <= 2:
+        return path
+    out = Path(work) / ("portrait" + path.suffix.lower())
+    subprocess.run([CONFIG["ffmpeg"], "-v", "error", "-y", "-i", str(path), "-vf", f"crop={cw}:{ch}",
+                    "-frames:v", "1", str(out)], capture_output=True, creationflags=NO_WINDOW)
+    return out if out.is_file() and out.stat().st_size else path
+
+
 def generate(prompt, references=(), cancelled=None, on_progress=None):
     """Generate one image. Returns the path of a copy in StoryCraft's media folder."""
     st = status()
@@ -274,7 +293,7 @@ def generate(prompt, references=(), cancelled=None, on_progress=None):
             raise ImageError("Codex finished but no image file was found for this run. Update Codex and try again.")
         if saved.stat().st_size > 40 * 1024 * 1024:
             raise ImageError("The generated image file is too large.")
-        data = saved.read_bytes()
+        data = to_portrait(saved, work).read_bytes()
         target = MEDIA_DIR / f"gen_{hashlib.sha1(data).hexdigest()[:16]}{saved.suffix.lower()}"
         if not target.exists():
             target.write_bytes(data)

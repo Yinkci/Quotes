@@ -112,7 +112,8 @@ function sceneDuration(index) {
   if (!n) return null;
   const fps = +s.export.fps, last = index === scenes.length - 1;
   const m = s.music, musicOn = m.enabled && m.file && +m.volume > 0;     // the music fades out after the hold
-  const tail = last ? Math.max(0.2, +s.timing.end_hold) + (musicOn ? Math.max(0, +m.fade_out) : 0)
+  const click = s.outro?.click && +s.intro.volume > 0 ? 0.5 : 0;     // OUTRO_TAIL: the radio clicks off
+  const tail = last ? Math.max(0.2, +s.timing.end_hold) + (musicOn ? Math.max(0, +m.fade_out) : 0) + click
     : Math.max(0, +(endsSentence(sc.script) ? s.timing.pause_sentence : s.timing.pause_open));
   const io = s.intro, intro = index === 0 && io?.enabled && io.file && +io.volume > 0     // the voice waits this long
     ? Math.min(+io.length || 0, Math.max(0, +(io.voice_at ?? 0.7))) : 0;
@@ -436,7 +437,7 @@ async function playScene(i, btn) {
 /* ---------------------------------------------------------------- settings UI */
 const sec = (v) => `${(+v).toFixed(2)} s`;
 const BIND = [
-  ["sVoice", "voice", "voice"], ["sEffect", "voice", "effect"], ["sSoftenS", "voice", "soften_s", "bool"], ["sVolume", "voice", "volume", "num"], ["sSpeed", "voice", "speed", "num", "oSpeed", (v) => `${(+v).toFixed(2)}×`],
+  ["sVoice", "voice", "voice"], ["sEffect", "voice", "effect"], ["sSoftenS", "voice", "soften_s", "bool"], ["sSettleEnd", "voice", "settle_end", "bool"], ["sVolume", "voice", "volume", "num"], ["sSpeed", "voice", "speed", "num", "oSpeed", (v) => `${(+v).toFixed(2)}×`],
   ["sSubEnabled", "subtitles", "enabled", "bool"], ["sFont", "subtitles", "font"],
   ["sSize", "subtitles", "size", "num"], ["sPosX", "subtitles", "position_x", "num"],
   ["sMaxW", "subtitles", "max_width", "num"],
@@ -445,15 +446,23 @@ const BIND = [
   ["sShadow", "subtitles", "shadow", "num", "oShadow", (v) => v],
   ["sPos", "subtitles", "position", "num"],
   ["sColor", "subtitles", "color"], ["sOutlineColor", "subtitles", "outline_color"],
-  ["sBold", "subtitles", "bold", "bool"], ["sItalic", "subtitles", "italic", "bool"], ["sUpper", "subtitles", "uppercase", "bool"], ["sFirstAtStart", "subtitles", "first_at_start", "bool"],
+  ["sBold", "subtitles", "bold", "bool"], ["sItalic", "subtitles", "italic", "bool"], ["sUpper", "subtitles", "uppercase", "bool"], ["sFirstAtStart", "subtitles", "first_at_start", "bool"], ["sFlourish", "subtitles", "flourish", "bool"],
   ["wEnabled", "watermark", "enabled", "bool"], ["wText", "watermark", "text"], ["wFont", "watermark", "font"],
   ["wPosX", "watermark", "position_x", "num"], ["wPosY", "watermark", "position_y", "num"],
   ["wSize", "watermark", "size", "num"], ["wOpacity", "watermark", "opacity", "num"],
   ["wOutline", "watermark", "outline", "num", "oWOutline", (v) => v], ["wShadow", "watermark", "shadow", "num", "oWShadow", (v) => v],
   ["wColor", "watermark", "color"], ["wOutlineColor", "watermark", "outline_color"], ["wBold", "watermark", "bold", "bool"], ["wItalic", "watermark", "italic", "bool"],
   ["mEnabled", "music", "enabled", "bool"], ["mVolume", "music", "volume", "num"], ["mFade", "music", "fade_out", "num"],
-  ["mDuck", "music", "duck", "bool"], ["iEnabled", "intro", "enabled", "bool"], ["iVoiceAt", "intro", "voice_at", "num"], ["iTape", "intro", "tape", "bool"], ["iVolume", "intro", "volume", "num"],
+  ["mDuck", "music", "duck", "bool"], ["mRadio", "music", "radio", "bool"], ["iEnabled", "intro", "enabled", "bool"], ["iVoiceAt", "intro", "voice_at", "num"], ["iTape", "intro", "tape", "bool"], ["iVolume", "intro", "volume", "num"],
   ["ovEnabled", "overlay", "enabled", "bool"], ["ovPosX", "overlay", "position_x", "num"], ["ovPosY", "overlay", "position_y", "num"],
+  ["ovPulse", "overlay", "pulse", "num"], ["ovPulseMode", "overlay", "pulse_mode"], ["ovShadow", "overlay", "shadow", "bool"], ["ovGraded", "overlay", "graded", "bool"],
+  ["stEnabled", "station", "enabled", "bool"], ["stText", "station", "text"], ["stPosX", "station", "position_x", "num"],
+  ["stPosY", "station", "position_y", "num"], ["stSize", "station", "size", "num"], ["stFont", "station", "font"],
+  ["stColor", "station", "color"], ["stGlow", "station", "glow", "bool"], ["stLines", "station", "lines", "bool"], ["stOnAir", "station", "on_air", "bool"],
+  ["vzEnabled", "visualizer", "enabled", "bool"], ["vzPosX", "visualizer", "position_x", "num"], ["vzPosY", "visualizer", "position_y", "num"],
+  ["vzWidth", "visualizer", "width", "num"], ["vzColor", "visualizer", "color"],
+  ["soClick", "outro", "click", "bool"], ["soTextEnabled", "outro", "text_enabled", "bool"], ["soText", "outro", "text"],
+  ["txGrain", "texture", "grain", "num"], ["txVignette", "texture", "vignette", "num"],
   ["ovSize", "overlay", "size", "num"], ["ovOpacity", "overlay", "opacity", "num"],
   ["cStrength", "color", "strength", "num"],
   ["sPauseSent", "timing", "pause_sentence", "num", "oPauseSent", sec], ["sPauseOpen", "timing", "pause_open", "num", "oPauseOpen", sec], ["sSentPause", "timing", "sentence_pause", "num", "oSentPause", sec],
@@ -684,16 +693,114 @@ function updateWatermarkPreview(scale) {
   el.style.textShadow = w.shadow ? `0 calc(${w.shadow * scale}cqh) calc(${w.shadow * scale}cqh) rgba(0,0,0,.5)` : "none";
 }
 
+/* ---------------------------------------------------------------- station tag (like a radio display) */
+function updateStationPreview() {
+  const st = S().station, el = $("#posterStation");
+  el.hidden = !st.enabled || !(st.text || "").trim();
+  if (el.hidden) return;
+  const scale = 100 / 1920;      // ASS sizes are in a 1080x1920 frame; cqh = 1% of the preview height
+  $(".st-text", el).textContent = st.text.trim();
+  el.classList.toggle("no-lines", st.lines === false);
+  el.classList.toggle("no-onair", st.on_air === false);
+  el.style.left = `${st.position_x}%`;
+  el.style.top = `${st.position_y}%`;
+  el.style.fontFamily = `"${st.font}", Consolas, monospace`;
+  el.style.fontSize = `calc(${st.size * scale}cqh)`;
+  el.style.color = st.color;
+  el.style.textShadow = st.glow ? `0 0 calc(${10 * scale}cqh) ${st.color}, 0 0 calc(${3 * scale}cqh) rgba(0,0,0,.6)` : "none";
+}
+/* Where the voice waveform goes (the real moving bars are drawn in Preview video / the export). */
+function updateWavePreview() {
+  const v = S().visualizer, el = $("#posterWave");
+  el.hidden = !v.enabled;
+  if (el.hidden) return;
+  el.style.left = `${v.position_x}%`;
+  el.style.top = `${v.position_y}%`;
+  el.style.width = `${v.width}%`;
+  el.style.height = `calc(${v.width * 0.22 * 1080 / 1920}cqh)`;
+  el.style.background = `repeating-linear-gradient(90deg, ${v.color} 0 2px, transparent 2px 3px)`;
+  el.style.opacity = 0.55;
+}
+(() => {
+  const el = $("#posterWave");
+  let grab = null;
+  el.addEventListener("pointerdown", (e) => {
+    const r = el.getBoundingClientRect();
+    grab = { dx: r.left + r.width / 2 - e.clientX, dy: r.top + r.height / 2 - e.clientY };
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    e.preventDefault();
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!grab) return;
+    const box = $("#previewBox").getBoundingClientRect();
+    const clamp = (v) => Math.round(Math.min(100, Math.max(0, v)) * 2) / 2;
+    Object.assign(S().visualizer, { position_x: clamp(((e.clientX + grab.dx - box.left) / box.width) * 100),
+      position_y: clamp(((e.clientY + grab.dy - box.top) / box.height) * 100) });
+    for (const [id, section, key] of BIND) {
+      if (section === "visualizer" && (key === "position_x" || key === "position_y")) {
+        $("#" + id).value = S().visualizer[key]; syncNumber(id, S().visualizer[key]);
+      }
+    }
+    updatePoster(); markDirty();
+  });
+  const end = () => { grab = null; el.classList.remove("dragging"); };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+})();
+function setStation(values) {
+  Object.assign(S().station, values);
+  for (const [id, section, key] of BIND) {
+    if (section !== "station" || !(key in values)) continue;
+    $("#" + id).value = values[key];
+    syncNumber(id, values[key]);
+  }
+  updatePoster();
+  markDirty();
+}
+(() => {
+  const el = $("#posterStation");
+  let grab = null;
+  el.addEventListener("pointerdown", (e) => {
+    const r = el.getBoundingClientRect();
+    grab = { dx: r.left + r.width / 2 - e.clientX, dy: r.top + r.height / 2 - e.clientY };
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    e.preventDefault();
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!grab) return;
+    const box = $("#previewBox").getBoundingClientRect();
+    const clamp = (v) => Math.round(Math.min(100, Math.max(0, v)) * 2) / 2;
+    setStation({ position_x: clamp(((e.clientX + grab.dx - box.left) / box.width) * 100),
+      position_y: clamp(((e.clientY + grab.dy - box.top) / box.height) * 100) });
+  });
+  const end = () => { grab = null; el.classList.remove("dragging"); };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+})();
+/* Caption preset for the Deep Talk Radio look: serif letters, warm cream, soft shadow. */
+$("#btnSubRadio").addEventListener("click", () => {
+  setSubtitleValues({ font: "Georgia", bold: true, italic: false, uppercase: false, size: 66, flourish: false,
+    color: "#FFF1D6", outline: 0, outline_color: "#24170B", shadow: 6 });
+  settingsToUI();
+  toast("Deep Talk Radio caption style applied.");
+});
+
 /* ---------------------------------------------------------------- overlay (a picture on top, e.g. the radio GIF) */
 function updateOverlayPreview() {
   const o = S().overlay, el = $("#posterOverlay");
   $("#ovName").textContent = o.name || (o.file ? o.file.split(/[\\/]/).pop() : "No picture chosen");
   $("#ovName").classList.toggle("set", !!o.file); $("#ovName").title = o.file || "";
   $("#btnOverlayReset").hidden = o.file === STATUS.defaults.overlay.file;
+  $("#posterVignette").style.opacity = Math.min(1, (+S().texture.vignette || 0) / 100 * 1.4);
+  updateStationPreview();
+  updateWavePreview();
   el.hidden = !o.enabled || !o.file;
   if (el.hidden) return;
   const url = imgUrl(o.file);
   if (el.dataset.src !== url) { el.src = url; el.dataset.src = url; }
+  el.classList.toggle("shadowed", o.shadow !== false);
   el.style.left = `${o.position_x}%`;
   el.style.top = `${o.position_y}%`;
   el.style.width = `${o.size}%`;
@@ -821,6 +928,16 @@ function showCaption() {
 
 /* Swap the still preview's image only once the next one is loaded and decoded: setting src directly
    blanks the picture (black) while a big PNG loads, so changing scene would flash black. */
+const NEAR_FIT = 0.12;   // keep in sync with render.py
+// Same rule as the renderer, for every picture in the page (thumbnails, preview, lists): near-9:16 images
+// fill their 9:16 box instead of showing thin black bars.
+document.addEventListener("load", (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.naturalHeight) return;
+  const r = img.naturalWidth / img.naturalHeight / (9 / 16);
+  img.classList.toggle("near-fit", Math.abs(r - 1) <= NEAR_FIT);
+}, true);
+
 function swapPoster(img, url) {
   img.dataset.want = url;
   if (img.getAttribute("src") === url) return;
@@ -898,7 +1015,8 @@ function showPreview(url) {
 }
 
 /* Subtitle position: number boxes, drag on the preview, positioning mode. */
-const POSITION_IDS = ["sSize", "sPosX", "sPos", "sMaxW", "wPosX", "wPosY", "wSize", "wText", "ovPosX", "ovPosY", "ovSize"];
+const POSITION_IDS = ["sSize", "sPosX", "sPos", "sMaxW", "wPosX", "wPosY", "wSize", "wText", "ovPosX", "ovPosY", "ovSize", "vzPosX", "vzPosY", "vzWidth",
+  "stPosX", "stPosY", "stSize", "stText"];
 let positioning = false;
 
 function syncNumber(id, v) {
@@ -1519,14 +1637,22 @@ $("#btnMusicClear").addEventListener("click", () => {
 
 /* ---- intro sound: plays over the first image, then the voice and the music start ---- */
 const introPlayer = new Audio();
-const builtinIntro = () => STATUS.defaults.intro;
+/* The sound list: the built-in sounds, plus your own file when one is chosen. */
 function updateIntroUI() {
-  const io = S().intro, name = $("#iName");
-  name.textContent = io.name || (io.file ? io.file.split(/[\\/]/).pop() : "No sound chosen");
-  name.classList.toggle("set", !!io.file); name.title = io.file || "";
-  $("#btnIntroReset").hidden = io.file === builtinIntro().file;
+  const io = S().intro, sel = $("#iBuiltin");
+  const builtins = STATUS.intro_sounds || [];
+  const own = io.file && !builtins.some((b) => b.file === io.file);
+  sel.innerHTML = builtins.map((b, k) => `<option value="${k}">${escapeHtml(b.name)}</option>`).join("") +
+    (own ? `<option value="own">${escapeHtml(io.name || io.file.split(/[\\/]/).pop())}</option>` : "");
+  sel.value = own ? "own" : String(Math.max(0, builtins.findIndex((b) => b.file === io.file)));
   introPlayer.pause(); $("#btnIntroPlay").textContent = "▶";
 }
+$("#iBuiltin").addEventListener("change", (e) => {
+  const b = (STATUS.intro_sounds || [])[+e.target.value];
+  if (!b) return;
+  Object.assign(S().intro, { file: b.file, name: b.name, length: b.length, voice_at: b.voice_at, enabled: true });
+  settingsToUI(); updateTotals(); markDirty();
+});
 introPlayer.addEventListener("ended", () => ($("#btnIntroPlay").textContent = "▶"));
 $("#btnIntroPick").addEventListener("click", async () => {
   try {
@@ -1544,11 +1670,6 @@ $("#btnIntroPlay").addEventListener("click", () => {
   introPlayer.volume = Math.max(0, Math.min(1, +io.volume / 100));
   introPlayer.play().then(() => ($("#btnIntroPlay").textContent = "⏸"))
     .catch(() => showMessage("Can't play the intro sound", "The sound file was not found. Choose it again."));
-});
-$("#btnIntroReset").addEventListener("click", () => {
-  const b = builtinIntro();
-  Object.assign(S().intro, { file: b.file, name: b.name, length: b.length });
-  settingsToUI(); markDirty();
 });
 
 /* ---- previous episodes: story, last images and time of day carry over into this one ---- */
@@ -1915,6 +2036,12 @@ ${previously}`);
   parts.push("COMPOSITION: exactly 9:16 vertical portrait (941x1672), taller than wide — never landscape or square. Use the " +
     "height: layer the scene from foreground to background (near things at the bottom or edges, the subject in the middle " +
     "distance, the far part of the place above). Keep the important action inside the frame with a little margin.");
+  // The radio overlay covers the bottom of every video: keep people out of it and give the radio something to sit on.
+  if (S().overlay.enabled) parts.push("RADIO SPACE: an old cassette radio will be placed over the BOTTOM 30% of this image. " +
+    "No person or animal may be in that area — nobody standing, sitting or lying there, and no feet or legs reaching " +
+    "into it. Every person is fully in the upper 70%, feet included: further back in the scene, on higher ground, or " +
+    "shown from the waist up. Fill the bottom 30% with simple, calm foreground the radio can sit on: a floor, a ledge, " +
+    "a table top, a rock, grass, sand or a path — no faces, hands or important objects there.");
   // With a world mood, drop the "avoid" items that would forbid it (dramatic lighting, light sources, rain, detailed backgrounds).
   const avoid = (ART.avoid || "").split(",").map((s) => s.trim())
     .filter((s) => s && !(world && /dramatic lighting|glowing light|light rays|rain|detailed rendering|detailed textures/i.test(s))).join(", ");

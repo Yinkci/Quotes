@@ -1,0 +1,7 @@
+{
+  "_note": "Where the speakers are in radio_cassette.gif (pixels of the GIF). Only these discs pulse with the voice.",
+  "speakers": [
+    {"x": 255, "y": 646, "r": 174},
+    {"x": 1294, "y": 643, "r": 170}
+  ]
+}

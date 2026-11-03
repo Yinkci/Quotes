@@ -238,6 +238,25 @@ def is_eleven(voice):
     return str(voice or "").startswith(ELEVEN_PREFIX)
 
 
+def cut_off(wav):
+    """True when a clip stops while the voice is still sounding (its last 40 ms are loud). A finished clip
+    ends in the quiet tail _trim keeps; measured over the voice cache: normal <= 0.01, cut off >= 0.06."""
+    n = int(0.04 * SAMPLE_RATE)
+    peak = float(np.abs(wav).max()) if len(wav) else 0.0
+    return len(wav) > 2 * n and peak > 0 and float(np.sqrt(np.mean(wav[-n:] ** 2))) > peak * CUT_OFF
+
+
+def fade_out(wav):
+    """Last resort for a cut-off clip: a 60 ms fade and a short silence, so it ends softly instead of clicking."""
+    n = min(len(wav), int(0.06 * SAMPLE_RATE))
+    wav = wav.astype(np.float32).copy()
+    wav[len(wav) - n:] *= np.linspace(1, 0, n, dtype=np.float32)
+    return np.concatenate([wav, np.zeros(int(0.08 * SAMPLE_RATE), dtype=np.float32)])
+
+
+CUT_OFF = 0.04
+
+
 class ElevenLabs:
     name = "ElevenLabs"
     model = ELEVEN_MODEL      # set from config.json (elevenlabs_model) by the app
@@ -650,8 +669,11 @@ class Narrator:
         path = self.cache_dir / f"{key}.npz"
         if path.exists():
             try:
-                data = np.load(path)
-                return data["audio"], words, [tuple(t) for t in data["times"].tolist()], True
+                with np.load(path) as data:       # closed right away: Windows can't replace an open file
+                    audio, times = data["audio"], [tuple(t) for t in data["times"].tolist()]
+                # A clip saved before cut-off endings were caught is made again (once: the new one never is)
+                if not (is_eleven(voice) and cut_off(audio)):
+                    return audio, words, times, True
             except Exception:
                 path.unlink(missing_ok=True)
         if is_cartesia(voice) or is_eleven(voice):
@@ -660,15 +682,24 @@ class Narrator:
                 raise CartesiaError(f"Add your {name} API key in Settings → Voice to use {name} voices.")
             with self._lock:      # one paid request per sentence, even if two tasks ask at the same time
                 if path.exists():
-                    data = np.load(path)
-                    return data["audio"], words, [tuple(t) for t in data["times"].tolist()], True
+                    with np.load(path) as data:
+                        audio, times = data["audio"], [tuple(t) for t in data["times"].tolist()]
+                    if not (is_eleven(voice) and cut_off(audio)):
+                        return audio, words, times, True
                 if cloud is self.cartesia:
                     audio, api_words, starts, ends = cloud.synth(text, voice, speed, emotion)
                     times = _align_words(words, api_words, starts, ends, len(audio) / SAMPLE_RATE)
                 else:
                     audio, times = cloud.synth_words(text, words, voice, speed, context)
                     audio, times = self._cut_run_on(audio, times)
+                    if cut_off(self._trim(audio, times)[0]) and text.rstrip()[-1:] not in ".!?…":
+                        # ElevenLabs sometimes stops mid-word on a short line with no end punctuation
+                        # ("But remember"): ask again with a full stop, which gives the model an ending.
+                        audio, times = cloud.synth_words(text.rstrip() + ".", words, voice, speed, context)
+                        audio, times = self._cut_run_on(audio, times)
                 audio, times = self._trim(audio, times)
+                if cut_off(audio):
+                    audio = fade_out(audio)
                 self._store(path, audio, times)
             return audio, words, times, False
         else:

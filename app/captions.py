@@ -164,7 +164,122 @@ def watermark_line(wm, play_w, play_h, duration):
     return f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration + 1)},Watermark,,0,0,0,,{tags}{_ass_escape(text)}"
 
 
-def write_ass(path, events, style, width=1080, height=1920, watermark=None, duration=0.0):
+STATION_CHAR = 0.55       # Consolas-like: a character is ~0.55 em wide (+ the Station style's 3 px spacing)
+ON_AIR_RED = "#FF4A3D"
+
+
+def _text_width(text, size):
+    """Rough width (px) of `text` in the Station style (monospaced), to place lines and boxes around it."""
+    return len(text) * (size * STATION_CHAR + 3)
+
+
+def _rect(x, y, w, h, color, alpha, layer, when):
+    """A filled rectangle drawn with ASS vector drawing (\\p1), top-left at (x, y)."""
+    return (rf"Dialogue: {layer},{when},Station,,0,0,0,,{{\an7\pos({x:.0f},{y:.0f})\p1\bord0\shad0"
+            rf"\1c&H{_ass_color(color)[4:]}&\1a&H{alpha:02X}&}}m 0 0 l {w:.0f} 0 {w:.0f} {h:.0f} 0 {h:.0f}{{\p0}}")
+
+
+def _side_lines(cx, cy, half_gap, length, color, alpha, when, thick=2):
+    """Two thin horizontal lines left and right of a centered thing (its half width = half_gap)."""
+    return [_rect(cx - half_gap - length, cy - thick / 2, length, thick, color, alpha, 2, when),
+            _rect(cx + half_gap, cy - thick / 2, length, thick, color, alpha, 2, when)]
+
+
+def station_lines(st, play_w, play_h, duration):
+    """The station tag for the whole video, centered at X/Y % of the frame: a radio-display look, with a
+    soft glow of its own color behind it (its own layer, so the letters stay sharp), thin lines on both
+    sides, and an "ON AIR" light under it."""
+    text = (st.get("text") or "").strip()
+    if not st.get("enabled") or not text:
+        return []
+    x = play_w * min(max(float(st.get("position_x", 50)), 0), 100) / 100
+    y = play_h * min(max(float(st.get("position_y", 5)), 0), 100) / 100
+    size = int(st.get("size", 38))
+    color = st.get("color", "#FFB347")
+    when = f"{_ass_time(0)},{_ass_time(duration + 1)}"
+    pos = rf"\an5\pos({x:.0f},{y:.0f})\q2"
+    out = []
+    if st.get("glow", True):
+        glow = _ass_color(color)[4:]       # BBGGRR, for \3c
+        out.append(rf"Dialogue: 2,{when},Station,,0,0,0,,{{{pos}\3c&H{glow}&\bord6\blur10\3a&H90&\1a&HFF&\shad0}}"
+                   + _ass_escape(text))
+    out.append(rf"Dialogue: 3,{when},Station,,0,0,0,,{{{pos}}}{_ass_escape(text)}")
+    if st.get("lines", True):
+        out += _side_lines(x, y, _text_width(text, size) / 2 + size * 0.7, size * 2.6, color, 0x50, when)
+    if st.get("on_air", True):
+        out += on_air_lines(x, y + size * 1.75, max(16, round(size * 0.85)), when)
+    return out
+
+
+def on_air_lines(x, y, size, when):
+    """A red "ON AIR" light: the words in a rounded outlined box, radio waves on both sides, a soft glow."""
+    red = _ass_color(ON_AIR_RED)[4:]
+    label = "ON AIR"
+    tw = _text_width(label, size)
+    bw, bh, r = tw + size * 1.2, size * 1.55, size * 0.35
+    left, top = x - bw / 2, y - bh / 2
+    box = (f"m {r:.0f} 0 l {bw - r:.0f} 0 b {bw:.0f} 0 {bw:.0f} 0 {bw:.0f} {r:.0f} l {bw:.0f} {bh - r:.0f} "
+           f"b {bw:.0f} {bh:.0f} {bw:.0f} {bh:.0f} {bw - r:.0f} {bh:.0f} l {r:.0f} {bh:.0f} "
+           f"b 0 {bh:.0f} 0 {bh:.0f} 0 {bh - r:.0f} l 0 {r:.0f} b 0 0 0 0 {r:.0f} 0")
+    frame = rf"\an7\pos({left:.0f},{top:.0f})\p1\shad0\1a&HFF&\3c&H{red}&"
+    words = rf"\an5\pos({x:.0f},{y:.0f})\fs{size}\1c&H{red}&\3c&H{red}&\shad0"
+    waves_l = rf"\an6\pos({left - size * 0.45:.0f},{y:.0f})\fs{size}\1c&H{red}&\3c&H{red}&\shad0"
+    waves_r = rf"\an4\pos({left + bw + size * 0.45:.0f},{y:.0f})\fs{size}\1c&H{red}&\3c&H{red}&\shad0"
+    return [
+        rf"Dialogue: 2,{when},Station,,0,0,0,,{{{frame}\bord5\blur8\3a&HA0&}}{box}{{\p0}}",      # glow
+        rf"Dialogue: 2,{when},Station,,0,0,0,,{{{words}\bord5\blur8\3a&HA0&\1a&HFF&}}{label}",
+        rf"Dialogue: 3,{when},Station,,0,0,0,,{{{frame}\bord2}}{box}{{\p0}}",
+        rf"Dialogue: 3,{when},Station,,0,0,0,,{{{words}\bord0}}{label}",
+        rf"Dialogue: 3,{when},Station,,0,0,0,,{{{waves_l}\bord0}}((·",
+        rf"Dialogue: 3,{when},Station,,0,0,0,,{{{waves_r}\bord0}}·))",
+    ]
+
+
+def flourish_lines(style, margins, play_w, play_h, duration):
+    """A thin tapered swoosh under the captions, in the caption color, for the whole video."""
+    margin_l, margin_r, margin_v = margins
+    cx = (margin_l + play_w - margin_r) / 2
+    k = int(style.get("size", 84)) / 80
+    w, y = 300 * k, play_h - margin_v + 16 * k
+    path = (f"m 0 {9 * k:.1f} b {w * 0.3:.1f} {-2 * k:.1f} {w * 0.7:.1f} {-2 * k:.1f} {w:.1f} {5 * k:.1f} "
+            f"b {w * 0.7:.1f} {2 * k:.1f} {w * 0.3:.1f} {3.5 * k:.1f} 0 {9 * k:.1f}")
+    color = _ass_color(style.get("color", "#FFFFFF"))[4:]
+    when = f"{_ass_time(0)},{_ass_time(duration + 1)}"
+    return [rf"Dialogue: 1,{when},Station,,0,0,0,,{{\an7\pos({cx - w / 2:.0f},{y:.0f})\p1\bord0\shad0"
+            rf"\1c&H{color}&\1a&H30&\blur0.6}}{path}{{\p0}}"]
+
+
+def sign_off_lines(so, style, margins, play_w, play_h, station=None):
+    """The sign-off line ("Tune in tomorrow ...") just under the last caption (and its flourish), fading
+    in once the voice is done. Drawn like the station tag (its font, color and glow), so the ending
+    carries the brand."""
+    if not so:
+        return []
+    margin_l, margin_r, margin_v = margins
+    x = (margin_l + play_w - margin_r) / 2
+    y = play_h - margin_v + int(style.get("size", 84)) * (0.75 if style.get("flourish", False) else 0.45)
+    size = max(20, int((station or {}).get("size", 38)))
+    when = f"{_ass_time(so['start'])},{_ass_time(so['end'] - 0.005)}"
+    pos = rf"\an8\pos({x:.0f},{y:.0f})\fs{size}\q2\fad(700,0)"
+    glow = _ass_color((station or {}).get("color", "#FFB347"))[4:]
+    text = _ass_escape(so["text"])
+    return [rf"Dialogue: 2,{when},Station,,0,0,0,,{{{pos}\3c&H{glow}&\bord6\blur10\3a&H90&\1a&HFF&\shad0}}" + text,
+            rf"Dialogue: 3,{when},Station,,0,0,0,,{{{pos}}}" + text]
+
+
+def visualizer_lines(vis, play_w, play_h, duration):
+    """Thin lines on both sides of the voice waveform (the waveform itself is drawn by FFmpeg)."""
+    if not vis:
+        return []
+    x = play_w * float(vis["position_x"]) / 100
+    y = play_h * float(vis["position_y"]) / 100
+    half = play_w * float(vis["width"]) / 200
+    when = f"{_ass_time(0)},{_ass_time(duration + 1)}"
+    return _side_lines(x, y, half + 14, play_w * 0.12, vis.get("color", "#FFE9C7"), 0x60, when)
+
+
+def write_ass(path, events, style, width=1080, height=1920, watermark=None, duration=0.0, station=None,
+              sign_off=None, visualizer=None):
     """Write subtitles in a 1080x1920 reference frame, so sizes are 1080p pixels at any output or
     preview resolution."""
     play_w, play_h = 1080, 1920
@@ -200,6 +315,11 @@ def write_ass(path, events, style, width=1080, height=1920, watermark=None, dura
             outline=_ass_color((watermark or {}).get("outline_color", "#000000")),
             bold=-1 if (watermark or {}).get("bold", True) else 0, italic=-1 if (watermark or {}).get("italic") else 0,
             ow=float((watermark or {}).get("outline", 2)), sh=float((watermark or {}).get("shadow", 1))),
+        "Style: Station,{font},{size},{color},{color},&H00081218,&H00000000,-1,0,0,0,100,100,3,0,1,"
+        "1,0,5,0,0,0,1".format(
+            font=(station or {}).get("font", "Consolas").replace(",", " "),
+            size=int((station or {}).get("size", 38)),
+            color=_ass_color((station or {}).get("color", "#FFB347"))),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -219,5 +339,10 @@ def write_ass(path, events, style, width=1080, height=1920, watermark=None, dura
     wm_line = watermark_line(watermark or {}, play_w, play_h, duration)
     if wm_line:
         lines.append(wm_line)
+    lines += station_lines(station or {}, play_w, play_h, duration)
+    if events and style.get("flourish", False):
+        lines += flourish_lines(style, (margin_l, margin_r, margin_v), play_w, play_h, duration)
+    lines += visualizer_lines(visualizer, play_w, play_h, duration)
+    lines += sign_off_lines(sign_off, style, (margin_l, margin_r, margin_v), play_w, play_h, station)
     with open(path, "w", encoding="utf-8-sig") as f:
         f.write("\n".join(lines) + "\n")

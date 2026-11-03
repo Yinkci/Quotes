@@ -48,6 +48,7 @@ DEFAULT_LOOK = "Anime 03" if "Anime 03" in builtin_looks() else ""
 DEFAULT_SETTINGS = {
     "voice": {"voice": "am_liam", "speed": 1.0, "style": "story",
               "effect": "website", "soften_s": False,     # sound effect on the narration (VOICE_EFFECTS)
+              "settle_end": False,                        # last word slower + lower (settle_ending)
               "volume": 40},                              # % (voice_loudness): 100 = as loud as TikTok / Reels
     # Pauses after a scene, by how it ends (like quote reels: ~1.6 s heard after a full stop, ~0.7 s after
     # a comma or "..."; the voice clips add ~0.3 s of their own). Lead-in 0: the picture cuts on the first word.
@@ -58,7 +59,8 @@ DEFAULT_SETTINGS = {
                   "outline_color": "#000000", "outline": 6, "shadow": 2, "bold": True, "italic": False,
                   "uppercase": False, "position": 26, "position_x": 50, "max_width": 84,
                   "words_per_caption": 5,
-                  "first_at_start": True},     # the first caption is on screen from the first frame (the hook)
+                  "first_at_start": True,      # the first caption is on screen from the first frame (the hook)
+                  "flourish": False},          # a thin curved swoosh under the captions
     "imagegen": {"style": "", "no_text": True, "references": [], "continuity": True,
                  "places": "new"},        # "new": every scene is a different place; "story": stay until the story moves
     "story": {"continues_from": "",        # project file of the episode this one continues
@@ -66,7 +68,8 @@ DEFAULT_SETTINGS = {
     "watermark": {"enabled": False, "text": "", "font": "Arial", "size": 40, "color": "#FFFFFF",
                   "opacity": 70, "outline": 2, "outline_color": "#000000", "shadow": 1, "bold": True, "italic": False,
                   "anchor": "br", "position_x": 96, "position_y": 96},
-    "music": {"enabled": False, "file": "", "name": "", "volume": 15, "duck": True, "fade_out": 2.0},
+    "music": {"enabled": False, "file": "", "name": "", "volume": 15, "duck": True, "fade_out": 2.0,
+              "radio": True},       # the music sounds like it comes out of the radio too (MUSIC_RADIO)
     # A sound at the very start of the video (default: pressing Play on a cassette). The voice starts
     # voice_at s into it (0.7: right after the click; the rest of it plays on under the voice), or when it
     # ends if that's sooner. length (s) is only for the app's duration estimates. tape: the cassette keeps
@@ -75,8 +78,26 @@ DEFAULT_SETTINGS = {
               "volume": 70, "length": 2.4, "voice_at": 0.7, "tape": True},
     # A picture on top of the whole video, under the captions (default: the animated radio cassette GIF,
     # looping). size = % of the video width; position_x / position_y = where its center is, % of the frame.
+    # pulse: how much it moves with the voice; pulse_mode: "off" (it stays still), "classic" (the first version: the
+    # whole picture pulses from its center), "whole" (it bounces from its bottom edge, shadow too) or
+    # "speakers" (only its speaker cones push, when it has speaker info); shadow: a soft shadow under it;
+    # graded: the color grade is applied to it too, so it sits in the picture.
     "overlay": {"enabled": False, "file": str(OVERLAYS_DIR / "radio_cassette.gif"), "name": "Radio cassette",
-                "size": 60, "position_x": 50, "position_y": 16, "opacity": 100},
+                "size": 60, "position_x": 50, "position_y": 16, "opacity": 100,
+                "pulse": 3, "pulse_mode": "off", "shadow": True, "graded": True},
+    # The channel's name, always in the same spot (like a radio display). x / y: its center, % of the frame.
+    "station": {"enabled": True, "text": "DEEP TALK RADIO · 104.5 FM", "font": "Consolas", "size": 38,
+                "color": "#FFB347", "glow": True, "position_x": 50, "position_y": 5,
+                "lines": True,                 # thin lines on both sides of it
+                "on_air": True},               # a red "ON AIR" light under it
+    # The end: after the hold, the radio clicks off (the music and tape stop with it), and a line
+    # appears under the last caption once the voice is done.
+    "outro": {"click": True, "text_enabled": True, "text": "Tune in tomorrow · Deep Talk Radio"},
+    # Film grain and a soft vignette over the picture (0 = off), under the captions.
+    "texture": {"grain": 20, "vignette": 30},
+    # Bars that move with the voice, with thin lines on both sides. width: % of the video width;
+    # position_x / position_y: its center, % of the frame.
+    "visualizer": {"enabled": True, "width": 30, "position_x": 50, "position_y": 93, "color": "#FFE9C7"},
     # Color grade over the whole video: a built-in Look (luts/<look>.cube), or your own .cube file (lut wins).
     "color": {"look": DEFAULT_LOOK, "lut": "", "lut_name": "", "strength": 100},
     "motion": {"fit": "contain"},      # images are always static; only how they fit the frame is a choice
@@ -371,7 +392,8 @@ def narrate(project, narrator, job, progress_span=(0.0, 1.0), only=None):
             if not len(audio):
                 raise RenderError(f"Scene {i + 1}: narration produced no audio. Check the script text.")
             # The video's last words: the voice settles down on the final word, like the end of a talk.
-            settled = i == last_said and not runs_on(script) and last_word is not None
+            settled = (s["voice"].get("settle_end", False) and i == last_said and not runs_on(script)
+                       and last_word is not None)
             key = scene_audio_key(scene["script"], s, around, final, settled)
             if settled and not (AUDIO_DIR / f"{key}.wav").exists():
                 audio = settle_ending(audio, last_word)
@@ -433,7 +455,9 @@ def build_timeline(project, narration):
     rec = recording.of(project)
     intro = None if rec else intro_audio(s)
     # The voice waits this long for the intro sound (right after the click, not the whole sound).
-    intro_len = min(len(intro) / SAMPLE_RATE, max(0.0, float(s["intro"].get("voice_at", 0.7))))         if intro is not None else 0.0
+    intro_len = (min(len(intro) / SAMPLE_RATE, max(0.0, float(s["intro"].get("voice_at", 0.7))))
+                 if intro is not None else 0.0)
+    outro = None if rec else outro_audio(s)      # the radio clicks off at the very end
     scenes, frame = [], 0
     if rec:      # the recording sets the clock: scenes start exactly where they start in it
         lead_in = 0.0
@@ -450,6 +474,8 @@ def build_timeline(project, narration):
             music = s["music"]       # the music plays on through the hold, THEN fades out
             if music["enabled"] and music["file"] and float(music["volume"]) > 0:
                 tail += max(0.0, float(music["fade_out"]))
+            if outro is not None:
+                tail += OUTRO_TAIL
         else:     # breathe after a finished sentence, move on quickly when the thought continues
             done = ends_sentence(project["scenes"][i].get("script"))
             tail = max(0.0, float(t["pause_sentence"] if done else t["pause_open"]))
@@ -484,8 +510,18 @@ def build_timeline(project, narration):
         else:
             ev["end"] = min(ev["limit"], nxt["start"] if nxt else total)
         ev["end"] = max(ev["end"], ev["start"] + 0.2)
+    last = scenes[-1] if scenes and not rec else None
+    # With the cassette click at the end, the last caption goes a moment after the last word, well before
+    # the click (not through the whole hold and music fade).
+    if events and last and outro is not None:
+        voice_end = last["start"] + last["pre"] + last["speech"]
+        click = total - OUTRO_TAIL
+        ev = events[-1]
+        ev["end"] = max(ev["start"] + 0.2, min(ev["end"], voice_end + LAST_CAPTION_HOLD, click - 0.3))
     return {"fps": fps, "scenes": scenes, "total": total, "total_frames": total_frames,
-            "track": track, "events": events, "intro": intro,
+            "track": track, "events": events, "intro": intro, "outro": outro,
+            "outro_at": total - OUTRO_TAIL if outro is not None else total,      # the click; sound stops here
+            "voice_end": last["start"] + last["pre"] + last["speech"] if last else total,
             "audio_file": rec["file"] if rec else None}      # a recording is used as it is, at full quality
 
 
@@ -493,6 +529,9 @@ def build_timeline(project, narration):
 def _fit_mode(fit):
     # Older projects saved "auto"/"blur"; those now use contain so artwork is never cropped.
     return "cover" if fit == "cover" else "contain"
+
+
+NEAR_FIT = 0.12      # aspect-ratio difference small enough to crop rather than letterbox
 
 
 def _contain_box(size, cw, ch, scale=1.0):
@@ -506,6 +545,10 @@ def _contain_box(size, cw, ch, scale=1.0):
 def segment_filter(frames, width, height, fps, fit, size=None):
     """FFmpeg graph that holds one still image for `frames` frames."""
     hold = f"zoompan=z=1:x=0:y=0:d={frames}"
+    # Near-9:16 images (the generator sometimes returns e.g. 981x1602) fill the frame with a slight trim
+    # instead of getting thin black bars.
+    if fit == "contain" and size and abs((size[0] / size[1]) / (width / height) - 1) <= NEAR_FIT:
+        fit = "cover"
     if fit == "contain":
         bx, by, bw, bh = _contain_box(size, width, height)
         return (f"[0:v]scale={bw}:{bh}:flags=lanczos,setsar=1,format=rgb24,{hold}:s={bw}x{bh}:fps={fps},"
@@ -637,80 +680,287 @@ def apply_voice_effect(src, dst, voice):
     return dst
 
 
-def intro_audio(s):
-    """The intro sound (mono, SAMPLE_RATE, at its volume), or None when it's off or missing."""
-    intro = s["intro"]
-    vol = max(0.0, min(100.0, float(intro["volume"]))) / 100
-    if not intro["enabled"] or not vol or not Path(intro["file"] or "").is_file():
+def _sound(path, vol):
+    """A sound file as mono float32 at SAMPLE_RATE, times vol (0..1), or None if it's silent or missing."""
+    if not vol or not Path(path or "").is_file():
         return None
-    raw = subprocess.run([CONFIG["ffmpeg"], "-v", "error", "-i", str(intro["file"]), "-ac", "1",
+    raw = subprocess.run([CONFIG["ffmpeg"], "-v", "error", "-i", str(path), "-ac", "1",
                           "-ar", str(SAMPLE_RATE), "-f", "f32le", "-"], capture_output=True, check=True,
                          creationflags=NO_WINDOW).stdout
     audio = np.frombuffer(raw, np.float32) * vol
     return audio if len(audio) else None
 
 
+def _sfx_volume(s):
+    return max(0.0, min(100.0, float(s["intro"]["volume"]))) / 100
+
+
+def intro_audio(s):
+    """The intro sound (mono, SAMPLE_RATE, at its volume), or None when it's off or missing."""
+    return _sound(s["intro"]["file"], _sfx_volume(s)) if s["intro"]["enabled"] else None
+
+
 TAPE_FILE = SOUNDS_DIR / "cassette_run.wav"    # the tape running after Play: a seamless loop
 TAPE_XFADE = 0.7                                 # s: the loop comes in while the intro's own hiss fades out
+OUTRO_FILE = SOUNDS_DIR / "radio_off.wav"      # the radio clicked off at the end
+LAST_CAPTION_HOLD = 1.0                          # s the last caption stays after the last word
+OUTRO_TAIL = 0.5                                 # s the click gets at the very end of the video
+# Built-in intro sounds: (file, name, length s, when the voice starts s).
+INTRO_SOUNDS = [(SOUNDS_DIR / "cassette_play.wav", "Cassette play", 2.4, 0.7),
+                (SOUNDS_DIR / "radio_tuning.wav", "Radio tuning in", 1.0, 0.6)]
 
 
 def tape_audio(s):
     """The running-tape loop (mono, SAMPLE_RATE, at the intro volume), or None when it's off."""
-    intro = s["intro"]
-    if not intro.get("tape") or not TAPE_FILE.is_file():
-        return None
-    return intro_audio({"intro": {**intro, "file": str(TAPE_FILE)}})
+    return _sound(TAPE_FILE, _sfx_volume(s)) if s["intro"].get("tape") else None
 
 
-def add_intro(src, dst, intro, tape=None, fade_end=1.0):
-    """`src` (the finished narration) with the intro sound at its start, and the tape loop running from
-    the end of the intro to the end of the video (fading out over its last `fade_end` s). Returns dst."""
+def outro_audio(s):
+    """The radio's off click, or None when the sign-off click is off."""
+    return _sound(OUTRO_FILE, _sfx_volume(s)) if s["outro"].get("click") else None
+
+
+def add_sounds(src, dst, intro=None, tape=None, outro=None, stop_at=None, fade_end=1.0):
+    """`src` (the finished narration) with the intro sound at its start, the tape loop running from the
+    end of the intro until `stop_at` s (fading out over the last `fade_end` s before it), and the off
+    click at `stop_at`. Returns dst."""
     voice, sr = sf.read(str(src), dtype="float32")
-    n = min(len(voice), len(intro))
-    voice[:n] += intro[:n]
-    if tape is not None:
+    stop = len(voice) if stop_at is None else min(len(voice), int(round(stop_at * sr)))
+    if intro is not None:
+        n = min(len(voice), len(intro))
+        voice[:n] += intro[:n]
+    if tape is not None and intro is not None:
         start = max(0, len(intro) - int(TAPE_XFADE * sr))
-        run = np.resize(tape, max(0, len(voice) - start))       # repeats the loop as often as needed
+        run = np.resize(tape, max(0, stop - start))      # repeats the loop as often as needed
         fin = min(len(run), int(TAPE_XFADE * sr))
         run[:fin] *= np.sin(np.linspace(0, np.pi / 2, fin))
         fout = min(len(run), int(max(0.1, fade_end) * sr))
         run[len(run) - fout:] *= np.linspace(1, 0, fout)
-        voice[start:] += run
+        voice[start:stop] += run
+    if outro is not None:
+        n = min(len(voice) - stop, len(outro))
+        voice[stop:stop + n] += outro[:n]
     sf.write(str(dst), np.clip(voice, -0.98, 0.98), sr)
     return dst
 
 
-def overlay_filters(video, src, ov, width, height, out):
-    """Put input `src` (a picture or looping GIF, transparency kept) over `video`: `size` % of the frame
-    width, centered at (position_x, position_y) % of the frame. Ends with the video. Output label [out]."""
+PULSE_ATTACK = 0.04       # s: eased rise on a word (not an instant jump, which looks like twitching)
+PULSE_RELEASE = 0.18      # s: soft settle after it
+PULSE_GATE = 0.25         # below this share of the voice's loud level it rests, so it clearly bounces
+SPEAKER_PUSH = 5.0        # speakers mode: the cones move this many times the pulse setting (3 -> 15 %)
+# Whole mode: a bass thump, wider more than taller (squash and stretch), planted on its bottom edge.
+WHOLE_PUSH_W, WHOLE_PUSH_H = 2.0, 1.1     # x the pulse setting: 3 -> 6 % wider, 3.3 % taller
+
+
+def overlay_speakers(file):
+    """Speaker discs of an overlay picture [(x, y, r) in its own pixels], from the .json next to it
+    (e.g. overlays/radio_cassette.json); [] when it has none."""
+    side = Path(file).with_suffix(".json")
+    try:
+        return [(float(s["x"]), float(s["y"]), float(s["r"])) for s in json.loads(side.read_text(encoding="utf-8"))["speakers"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+CLASSIC_RELEASE = 0.12    # classic mode: the first version (instant rise, this settle, no gate)
+
+
+def write_pulse(path, track, fps, total, targets, classic=False):
+    """FFmpeg sendcmd file making each target [(scale filter name, (w, h) px, growth % wide, growth % tall)]
+    grow with the voice in `track`, per video frame: an eased rise on a word (PULSE_ATTACK), a soft settle
+    (PULSE_RELEASE). False when there's no voice."""
+    if track is None or not targets:
+        return False
+    hop = SAMPLE_RATE / fps
+    frames = int(math.ceil(total * fps))
+    rms = np.array([np.sqrt(np.mean(track[int(i * hop):int((i + 1) * hop)] ** 2) + 1e-12) for i in range(frames)])
+    loud = np.percentile(rms[rms > 1e-4], 95) if (rms > 1e-4).any() else 0
+    if not loud:
+        return False
+    env, level = np.zeros(frames), 0.0
+    rise, fall = 1 - math.exp(-1 / (PULSE_ATTACK * fps)), math.exp(-1 / (PULSE_RELEASE * fps))
+    # Quiet parts (between words, soft endings) rest at 0 and stressed syllables reach the full push: a
+    # clear bounce instead of hovering half-pushed through a whole sentence.
+    if classic:
+        fall = math.exp(-1 / (CLASSIC_RELEASE * fps))
+        for i, v in enumerate(np.clip(rms / loud, 0, 1)):
+            level = v if v > level else level * fall
+            env[i] = level
+    for i, v in ([] if classic else enumerate(np.clip((rms / loud - PULSE_GATE) / (1 - PULSE_GATE), 0, 1) ** 0.8)):
+        level = level + (v - level) * rise if v > level else level * fall
+        env[i] = level
+    lines, last = [], None
+    for i, e in enumerate(env):
+        sizes = tuple((max(2, round(w * (1 + pw / 100 * e) / 2) * 2), max(2, round(h * (1 + ph / 100 * e) / 2) * 2))
+                      for _, (w, h), pw, ph in targets)
+        if sizes != last:
+            cmds = ", ".join(f"scale@{t[0]} w {sw}, scale@{t[0]} h {sh}" for t, (sw, sh) in zip(targets, sizes))
+            lines.append(f"{i / fps:.4f} {cmds};")
+            last = sizes
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
+
+
+def overlay_layout(ov, width, height, src_size):
+    """(w, h, x, y) of the overlay in the video: its size and the center point, in pixels."""
     w = max(2, round(width * max(1.0, min(100.0, float(ov["size"]))) / 100 / 2) * 2)
-    alpha = max(0.0, min(100.0, float(ov["opacity"]))) / 100
+    sw, sh = src_size or (w, w)
+    h = max(2, round(w * sh / sw / 2) * 2)
     x = width * max(0.0, min(100.0, float(ov["position_x"]))) / 100
     y = height * max(0.0, min(100.0, float(ov["position_y"]))) / 100
-    fade = f",colorchannelmixer=aa={alpha:.3f}" if alpha < 1 else ""
-    return [f"[{src}:v]format=rgba,scale={w}:-2:flags=lanczos{fade}[ovl]",
-            f"{video}[ovl]overlay=x={x:.1f}-w/2:y={y:.1f}-h/2:shortest=1:format=auto[{out}]"]
+    return w, h, x, y
 
 
-def music_filters(nar, mus, music, total):
+def pulse_speakers(ov, src_size):
+    """The speaker discs to pump, when the pulse is in speakers mode and the picture has speaker info."""
+    return overlay_speakers(ov["file"]) if ov.get("pulse_mode") == "speakers" and src_size else []
+
+
+def pulse_targets(ov, width, height, src_size):
+    """What grows with the voice: the whole picture and its shadow (scale@pulse, scale@pulsesh), or in
+    speakers mode each speaker disc (scale@spk0, scale@spk1, ...)."""
+    pct = max(0.0, float(ov.get("pulse", 0)))
+    if pct <= 0 or ov.get("pulse_mode", "off") == "off":
+        return []
+    w, h, _, _ = overlay_layout(ov, width, height, src_size)
+    speakers = pulse_speakers(ov, src_size)
+    if speakers:
+        k = w / src_size[0]
+        return [(f"spk{i}", (max(2, round(2 * r * k / 2) * 2),) * 2, pct * SPEAKER_PUSH, pct * SPEAKER_PUSH)
+                for i, (_, _, r) in enumerate(speakers)]
+    if ov.get("pulse_mode", "off") == "classic":
+        return [("pulse", (w, h), pct, pct)]
+    targets = [("pulse", (w, h), pct * WHOLE_PUSH_W, pct * WHOLE_PUSH_H)]
+    if ov.get("shadow", True):
+        targets.append(("pulsesh", (w, h), pct * WHOLE_PUSH_W, pct * WHOLE_PUSH_H))
+    return targets
+
+
+def overlay_filters(video, src, ov, width, height, out, fps=30, pulse=None, grade="", k=1.0, src_size=None):
+    """Put input `src` (a picture or looping GIF, transparency kept) over `video`: `size` % of the frame
+    width, centered at (position_x, position_y) % of the frame, with a soft shadow under it and the color
+    grade on it (when on). With the sendcmd file `pulse`, it bounces with the voice from its bottom edge
+    (its shadow with it), or in speakers mode only its speaker cones push out. Ends with the video.
+    Output label [out]."""
+    w, h, x, y = overlay_layout(ov, width, height, src_size)
+    alpha = max(0.0, min(100.0, float(ov["opacity"]))) / 100
+    speakers = pulse_speakers(ov, src_size) if pulse else []
+    classic = bool(pulse) and ov.get("pulse_mode", "off") == "classic"
+    whole = bool(pulse) and not speakers and not classic
+    # Resized-by-command pictures go straight into their overlay: any filter after the scale would make
+    # FFmpeg add a converter there, which quietly scales every frame back to the first size.
+    # (Classic mode is the first version, kept as it was: resized at the start, before the grade.)
+    resize = f"sendcmd=f={pulse},scale@pulse=w={w}:h={h}:flags=bicubic" if classic else f"scale={w}:{h}:flags=lanczos"
+    parts = [f"[{src}:v]fps={fps},format=rgba,{resize}[ov0]"]
+    last = "ov0"
+    if grade and ov.get("graded", True):      # grade the colors, keep the transparency
+        mix = (f"[ovc]format=gbrp,split[ovo][ovg];[ovg]{grade}[ovgg];"
+               f"[ovo][ovgg]blend=all_expr='A*{1 - k:.3f}+B*{k:.3f}',format=gbrp[ovmix]" if k < 0.999 else
+               f"[ovc]format=gbrp,{grade},format=gbrp[ovmix]")
+        parts.append(f"[{last}]split[ovc][ova];[ova]format=rgba,alphaextract[ovalpha];{mix};[ovmix][ovalpha]alphamerge,format=rgba[ov1]")
+        last = "ov1"
+    if alpha < 1:
+        parts.append(f"[{last}]colorchannelmixer=aa={alpha:.3f}[ov2]")
+        last = "ov2"
+    if speakers:          # copies of the radio for the speaker discs, cut out below
+        parts.append(f"[{last}]format=rgba,split={len(speakers) + 1}[ovr]" + "".join(f"[spc{i}]" for i in range(len(speakers))))
+        last = "ovr"
+    # A bouncing picture keeps its bottom edge where it is (it stands on something): it grows upward.
+    top = f"{y + h / 2:.1f}-h" if whole else f"{y:.1f}-h/2"
+    base = video
+    if ov.get("shadow", True):        # a soft dark copy, a little lower, under it (bouncing with it)
+        blur = max(2, round(w * 0.012))
+        drop = round(h * 0.035)
+        stop = f"{y + h / 2 + drop:.1f}-h" if whole else f"{y + drop:.1f}-h/2"
+        bounce = ",scale@pulsesh=w={w}:h={h}:flags=bicubic".format(w=w, h=h) if whole else ""
+        parts.append(f"[{last}]format=rgba,split[ovs][ovm];[ovs]colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0:"
+                     f"aa={0.55 * alpha:.3f},format=yuva420p,boxblur=luma_radius={blur}:chroma_radius={max(1, blur // 2)}:"
+                     f"alpha_radius={blur}{bounce}[ovsh];"
+                     f"{video}[ovsh]overlay=x={x:.1f}-w/2:y={stop}:shortest=1:format=auto[vsh]")
+        base, last = "[vsh]", "ovm"
+    final = "vrad" if speakers else out
+    if whole:
+        parts.append(f"[{last}]sendcmd=f={pulse},scale@pulse=w={w}:h={h}:flags=bicubic[ovp]")
+        last = "ovp"
+    parts.append(f"{base}[{last}]overlay=x={x:.1f}-w/2:y={top}:shortest=1:format=auto[{final}]")
+    # Speakers mode: each disc cut out of the radio as a soft-edged circle, scaled from its own center
+    # with the voice, and laid back exactly over its speaker.
+    kx = w / src_size[0] if speakers else 1
+    left, upper = x - w / 2, y - h / 2
+    cur = final
+    for i, (sx, sy, r) in enumerate(speakers):
+        d = max(2, round(2 * r * kx / 2) * 2)
+        cx, cy = sx * kx, sy * kx
+        cmd = f"sendcmd=f={pulse}," if i == 0 else ""
+        mask = "alpha(X,Y)*clip((W/2-1.5-hypot(X-W/2,Y-H/2))/1.5,0,1)"
+        nxt = out if i == len(speakers) - 1 else f"vspk{i}"
+        parts.append(f"[spc{i}]crop={d}:{d}:{max(0, round(cx - d / 2))}:{max(0, round(cy - d / 2))},format=rgba,"
+                     f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{mask}',{cmd}"
+                     f"scale@spk{i}=w={d}:h={d}:flags=bicubic[spk{i}];"
+                     f"[{cur}][spk{i}]overlay=x={left + cx:.1f}-w/2:y={upper + cy:.1f}-h/2:shortest=1:format=auto[{nxt}]")
+        cur = nxt
+    return parts
+
+
+# The music as if it came out of the radio too: less deep bass and no airy top, a little mid push.
+MUSIC_RADIO = ("highpass=f=150:poles=2,lowpass=f=5000:poles=2,lowpass=f=5000:poles=2,"
+               "equalizer=f=1200:t=q:w=1:g=2")
+
+
+def music_filters(nar, mus, music, total, end=None):
     """Mix looping background music under the narration: set volume, lower it while the narrator
-    speaks (optional), fade it out at the end. Output label [aout], exactly as long as the video."""
+    speaks (optional), fade it out so it's gone at `end` s (the radio's off click; default the video's
+    end). Output label [aout], exactly as long as the video."""
     fmt = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+    end = total if end is None else min(end, total)
     vol = max(0.0, min(100.0, float(music["volume"]))) / 100
-    fade = max(0.0, min(float(music["fade_out"]), total))
+    fade = max(0.0, min(float(music["fade_out"]), end))
+    radio = f"{MUSIC_RADIO}," if music.get("radio") else ""
     parts = [f"{nar}{fmt},asplit=2[nar][key]" if music["duck"] else f"{nar}{fmt}[nar]",
-             f"[{mus}:a]{fmt},volume={vol:.3f}[m0]"]
+             f"[{mus}:a]{fmt},{radio}volume={vol:.3f}[m0]"]
     last = "m0"
     if music["duck"]:
         parts.append(f"[m0][key]sidechaincompress=threshold=0.03:ratio=4:attack=30:release=600[m1]")
         last = "m1"
-    if fade > 0:
-        parts.append(f"[{last}]afade=t=out:st={total - fade:.3f}:d={fade:.3f}[m2]")
+    if fade > 0 or end < total:
+        fade = max(fade, 0.03)
+        parts.append(f"[{last}]afade=t=out:st={end - fade:.3f}:d={fade:.3f}[m2]")
         last = "m2"
     # The music adds to the voice's loudness: the limiter keeps the peaks of the mix from clipping.
     parts.append(f"[nar][{last}]amix=inputs=2:duration=first:normalize=0,"
                  f"alimiter=limit=0.84:attack=5:release=80:level=0[aout]")
     return parts
+
+
+def visualizer_filters(video, src, vis, width, height, fps, out):
+    """The voice from input `src` drawn as thin vertical bars (FFmpeg showwaves), tallest in the middle
+    and fading out to both ends, centered at (position_x, position_y) % of the frame. Output label [out]."""
+    bar = max(2, round(width / 360))          # px per bar (3 at 1080p), then a 1 px gap
+    step = bar + 1
+    w = max(16, round(width * max(5.0, min(90.0, float(vis["width"]))) / 100 / step) * step)
+    h = max(8, round(w * 0.22 / 2) * 2)
+    x = width * max(0.0, min(100.0, float(vis["position_x"]))) / 100
+    y = height * max(0.0, min(100.0, float(vis["position_y"]))) / 100
+    color = (vis.get("color") or "#FFE9C7").lstrip("#")
+    # Drawn at one column per bar, widened to whole bars, then cut into bars with gaps; tallest in the
+    # middle, fading out to both ends.
+    return [f"[{src}:a]aformat=channel_layouts=mono,volume=2,"
+            f"showwaves=s={w // step}x{h}:mode=cline:rate={fps}:colors=0x{color}:scale=sqrt:draw=full,"
+            f"scale={w}:{h}:flags=neighbor,format=rgba,"
+            f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*0.92*sin(PI*X/W)*lt(mod(X,{step}),{bar})'[wv];"
+            f"{video}[wv]overlay=x={x:.1f}-w/2:y={y:.1f}-h/2:shortest=1:format=auto[{out}]"]
+
+
+def texture_filter(texture, width):
+    """Film grain + vignette for the picture ('' when both are off)."""
+    grain = max(0.0, min(100.0, float(texture.get("grain", 0))))
+    vig = max(0.0, min(100.0, float(texture.get("vignette", 0))))
+    out = []
+    if vig > 0:
+        out.append(f"vignette=angle={math.pi / 2.2 * vig / 100:.4f}")
+    if grain > 0:
+        out.append(f"noise=alls={grain * 0.25 * width / 1080:.1f}:allf=t")
+    return ",".join(out)
 
 
 def render_blank(frames, width, height, fps, preview, job):
@@ -751,11 +1001,16 @@ def render(project, narrator, job, preview):
     try:
         if tl["audio_file"] is None:
             sf.write(str(work / "narration.wav"), tl["track"], SAMPLE_RATE)
-        subs, wm = s["subtitles"], s["watermark"]
-        burn = subs["enabled"] or (wm["enabled"] and wm["text"].strip())
+        subs, wm, station, outro = s["subtitles"], s["watermark"], s["station"], s["outro"]
+        # The sign-off line: under the last caption from when the voice is done until the end.
+        sign_off = ({"text": outro["text"].strip(), "start": tl["voice_end"], "end": tl["total"]}
+                    if outro.get("text_enabled") and (outro.get("text") or "").strip() and not tl["audio_file"] else None)
+        vis = s["visualizer"] if s["visualizer"].get("enabled") else None
+        burn = (subs["enabled"] or (wm["enabled"] and wm["text"].strip()) or sign_off or vis
+                or (station["enabled"] and station["text"].strip()))
         if burn:
             write_ass(work / "subs.ass", tl["events"] if subs["enabled"] else [], subs, width, height,
-                      watermark=wm, duration=tl["total"])
+                      watermark=wm, duration=tl["total"], station=station, sign_off=sign_off, visualizer=vis)
 
         clips, n = [], len(tl["scenes"])
         for i, sc in enumerate(tl["scenes"]):
@@ -772,9 +1027,10 @@ def render(project, narrator, job, preview):
         narration = str(apply_voice_effect(narration, work / "narration_fx.wav", s["voice"]))   # voice effect, level-matched
         music = s["music"]
         use_music = music["enabled"] and music["file"] and float(music["volume"]) > 0 and not tl["audio_file"]
-        if tl["intro"] is not None:      # added after the voice effect, so the sound stays as it is
-            narration = str(add_intro(narration, work / "narration_intro.wav", tl["intro"], tape_audio(s),
-                                      fade_end=float(music["fade_out"]) if use_music else 1.0))
+        if tl["intro"] is not None or tl["outro"] is not None:   # after the voice effect: the sounds stay as they are
+            narration = str(add_sounds(narration, work / "narration_sfx.wav", tl["intro"], tape_audio(s),
+                                       tl["outro"], stop_at=tl["outro_at"],
+                                       fade_end=float(music["fade_out"]) if use_music else 1.0))
         args += ["-i", narration]
         if use_music:
             args += ["-stream_loop", "-1", "-i", str(music["file"])]      # loops for the whole video
@@ -784,6 +1040,10 @@ def render(project, narrator, job, preview):
             ov_input = n + 1 + (1 if use_music else 0)
             loop = ["-ignore_loop", "0"] if Path(ov["file"]).suffix.lower() == ".gif" else ["-loop", "1"]
             args += loop + ["-i", str(ov["file"])]       # a GIF keeps looping, a still picture stays
+        vis_input = None
+        if vis:                       # the narration once more, drawn as moving bars
+            vis_input = n + 1 + (1 if use_music else 0) + (1 if ov_input is not None else 0)
+            args += ["-i", narration]
         # The color grade is applied to every scene clip before they are joined, ending in YUV again.
         grade = color_grade_filter(s["color"], work)
         parts = []
@@ -802,13 +1062,25 @@ def render(project, narrator, job, preview):
             parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vc]")
             last = "vc"
         if ov_input is not None:     # on top of the pictures, under the captions
-            parts += overlay_filters(f"[{last}]", ov_input, ov, width, height, "vov")
+            size = image_size(ov["file"])
+            pulse = "pulse.txt" if write_pulse(work / "pulse.txt", tl["track"], fps, tl["total"],
+                                               pulse_targets(ov, width, height, size),
+                                               classic=ov.get("pulse_mode", "off") == "classic") else None
+            parts += overlay_filters(f"[{last}]", ov_input, ov, width, height, "vov", fps=fps, pulse=pulse,
+                                     grade=grade, k=grade_k(s["color"]), src_size=size)
             last = "vov"
+        if vis_input is not None:     # bars that move with the voice
+            parts += visualizer_filters(f"[{last}]", vis_input, vis, width, height, fps, "vvis")
+            last = "vvis"
+        texture = texture_filter(s["texture"], width)
+        if texture:                  # over the picture and the overlay, under the captions
+            parts.append(f"[{last}]{texture}[vtx]")
+            last = "vtx"
         sub_filter = "ass=subs.ass," if burn else ""
         parts.append(f"[{last}]{sub_filter}scale=out_range=tv,format=yuv420p[out]")  # JPGs are full-range; output standard TV range
         audio_map = f"{n}:a"
         if use_music:
-            parts += music_filters(f"[{n}:a]", n + 1, music, tl["total"])
+            parts += music_filters(f"[{n}:a]", n + 1, music, tl["total"], end=tl["outro_at"])
             audio_map = "[aout]"
         if preview:
             preset, crf = "ultrafast", 26

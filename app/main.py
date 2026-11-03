@@ -22,7 +22,7 @@ from .config import ARTSTYLE_DIR, CONFIG, MEDIA_DIR, MY_DEFAULTS_FILE, PROJECTS_
 from .render import (AUDIO_DIR, DEFAULT_SETTINGS, PREVIEW_DIR, VOICE_EFFECTS, Job, RenderError,
                      build_timeline, cache_info, cleanup_cache, clear_video_cache, merged_settings,
                      apply_my_defaults, builtin_looks, defaults_from, lut_kind, narrate, render, scene_summary,
-                     trim_segments, apply_voice_effect, intro_audio, voice_master_tag)
+                     trim_segments, apply_voice_effect, intro_audio, voice_master_tag, INTRO_SOUNDS)
 from .tts import (ELEVEN_MODEL, ELEVEN_MODELS, SAMPLE_RATE, Cancelled, Cartesia, CartesiaError, ElevenLabs,
                   Narrator)
 
@@ -104,6 +104,8 @@ def status(refresh_voices: bool = False):
             "kokoro_voice_count": kokoro_count,
             "voices": voices, "defaults": defaults,
             "voice_effects": {k: v[0] for k, v in VOICE_EFFECTS.items()},
+            "intro_sounds": [{"file": str(f), "name": name, "length": length, "voice_at": at}
+                             for f, name, length, at in INTRO_SOUNDS if f.is_file()],
             "looks": builtin_looks(),
             "fonts": list_fonts(),
             "projects_dir": str(PROJECTS_DIR), "config_file": str(ROOT / "config.json"),

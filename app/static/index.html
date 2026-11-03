@@ -62,9 +62,12 @@
       <div class="preview-box" id="previewBox">
         <div class="poster" id="poster">
           <img id="posterImg" alt="">
+          <div class="poster-vignette" id="posterVignette"></div>
           <img class="poster-overlay" id="posterOverlay" alt="" hidden draggable="false">
           <div class="poster-caption" id="posterCaption">the world was about to end.</div>
           <div class="poster-watermark" id="posterWatermark" hidden></div>
+          <div class="poster-station" id="posterStation" hidden><span class="st-text"></span><span class="st-onair">ON AIR</span></div>
+          <div class="poster-wave" id="posterWave" hidden></div>
         </div>
         <video id="previewVideo" controls playsinline hidden></video>
       </div>
@@ -105,6 +108,7 @@
         <div class="field"><label>Voice effect <span class="hint">added to the narration in the video</span></label>
           <select id="sEffect"></select></div>
         <label class="toggle"><input type="checkbox" id="sSoftenS"> Soften sharp "s" sounds</label>
+        <label class="toggle" title="Slows the video's last word a little and glides its pitch down, so it lands like an ending. Can sound like a slow-motion deep voice."><input type="checkbox" id="sSettleEnd"> Settle the last word (slower, lower)</label>
         <div class="row">
           <button class="btn" id="btnTestVoice">▶ Test voice</button>
           <span class="muted small" id="voiceNote">Uses your local Kokoro install.</span>
@@ -174,6 +178,55 @@
           <label class="toggle"><input type="checkbox" id="sUpper"> UPPERCASE</label>
         </div>
         <label class="toggle"><input type="checkbox" id="sFirstAtStart"> Show the first caption right away (from the first frame)</label>
+        <label class="toggle"><input type="checkbox" id="sFlourish"> A thin curved swoosh under the captions</label>
+        <button class="btn sm" id="btnSubRadio" title="Serif letters, warm cream, soft shadow">📻 Deep Talk Radio caption style</button>
+      </details>
+
+      <details open>
+        <summary>Station tag</summary>
+        <label class="toggle"><input type="checkbox" id="stEnabled"> Show the station name</label>
+        <div class="field"><label>Text</label><input id="stText" spellcheck="false" placeholder="DEEP TALK RADIO · 104.5 FM"></div>
+        <div class="sub-group">
+          <div class="sub-group-head"><span>Position</span></div>
+          <div class="field"><label>X <span class="hint">0 = left · 100 = right</span></label><div class="slider-num"><input type="range" id="stPosX" min="0" max="100" step="0.5"><input type="number" class="num" data-for="stPosX" min="0" max="100" step="0.5"><span class="unit">%</span></div></div>
+          <div class="field"><label>Y <span class="hint">0 = top · 100 = bottom</span></label><div class="slider-num"><input type="range" id="stPosY" min="0" max="100" step="0.5"><input type="number" class="num" data-for="stPosY" min="0" max="100" step="0.5"><span class="unit">%</span></div></div>
+          <p class="muted small">Or drag it on the preview.</p>
+        </div>
+        <div class="field"><label>Size</label><div class="slider-num"><input type="range" id="stSize" min="16" max="90" step="1"><input type="number" class="num" data-for="stSize" min="16" max="90" step="1"><span class="unit">px</span></div></div>
+        <div class="field"><label>Font</label><input id="stFont" list="fontList" spellcheck="false"></div>
+        <div class="row colors">
+          <label class="color">Color <input type="color" id="stColor"></label>
+          <label class="toggle"><input type="checkbox" id="stGlow"> Glow</label>
+        </div>
+        <label class="toggle"><input type="checkbox" id="stLines"> Thin lines on both sides</label>
+        <label class="toggle"><input type="checkbox" id="stOnAir"> Red "ON AIR" light under it</label>
+      </details>
+
+      <details open class="tts-only">
+        <summary>Voice waveform</summary>
+        <label class="toggle"><input type="checkbox" id="vzEnabled"> Show bars that move with the voice</label>
+        <div class="sub-group">
+          <div class="sub-group-head"><span>Position</span></div>
+          <div class="field"><label>X <span class="hint">0 = left · 100 = right</span></label><div class="slider-num"><input type="range" id="vzPosX" min="0" max="100" step="0.5"><input type="number" class="num" data-for="vzPosX" min="0" max="100" step="0.5"><span class="unit">%</span></div></div>
+          <div class="field"><label>Y <span class="hint">0 = top · 100 = bottom</span></label><div class="slider-num"><input type="range" id="vzPosY" min="0" max="100" step="0.5"><input type="number" class="num" data-for="vzPosY" min="0" max="100" step="0.5"><span class="unit">%</span></div></div>
+          <p class="muted small">Or drag it on the preview.</p>
+        </div>
+        <div class="field"><label>Width <span class="hint">of the video width</span></label><div class="slider-num"><input type="range" id="vzWidth" min="10" max="80" step="1"><input type="number" class="num" data-for="vzWidth" min="10" max="80" step="1"><span class="unit">%</span></div></div>
+        <div class="row colors"><label class="color">Color <input type="color" id="vzColor"></label></div>
+      </details>
+
+      <details open class="tts-only">
+        <summary>Sign-off (the end)</summary>
+        <label class="toggle"><input type="checkbox" id="soClick"> The radio clicks off at the very end</label>
+        <label class="toggle"><input type="checkbox" id="soTextEnabled"> Show a closing line under the last caption</label>
+        <div class="field"><label>Closing line <span class="hint">appears when the voice is done, in the station tag style</span></label><input id="soText" spellcheck="false" placeholder="Tune in tomorrow · Deep Talk Radio"></div>
+      </details>
+
+      <details open>
+        <summary>Texture</summary>
+        <div class="field"><label>Film grain <span class="hint">0 = off</span></label><div class="slider-num"><input type="range" id="txGrain" min="0" max="100" step="1"><input type="number" class="num" data-for="txGrain" min="0" max="100" step="1"><span class="unit">%</span></div></div>
+        <div class="field"><label>Vignette <span class="hint">darker corners · 0 = off</span></label><div class="slider-num"><input type="range" id="txVignette" min="0" max="100" step="1"><input type="number" class="num" data-for="txVignette" min="0" max="100" step="1"><span class="unit">%</span></div></div>
+        <p class="muted small">Over the picture and the overlay, under the captions. The grain shows in Preview video.</p>
       </details>
 
 
@@ -223,6 +276,14 @@
         </div>
         <div class="field"><label>Size <span class="hint">of the video width</span></label><div class="slider-num"><input type="range" id="ovSize" min="5" max="100" step="1"><input type="number" class="num" data-for="ovSize" min="5" max="100" step="1"><span class="unit">%</span></div></div>
         <div class="field"><label>Opacity</label><div class="slider-num"><input type="range" id="ovOpacity" min="5" max="100" step="1"><input type="number" class="num" data-for="ovOpacity" min="5" max="100" step="1"><span class="unit">%</span></div></div>
+        <div class="field"><label>Bounce with the voice</label><select id="ovPulseMode">
+          <option value="off">Off (the radio stays still)</option>
+          <option value="classic">Original pulse (the whole radio, from its center)</option>
+          <option value="whole">Bounce (from its bottom edge, shadow too)</option>
+          <option value="speakers">Only the speakers</option></select></div>
+        <div class="field"><label>Bounce strength</label><div class="slider-num"><input type="range" id="ovPulse" min="0" max="10" step="0.5"><input type="number" class="num" data-for="ovPulse" min="0" max="10" step="0.5"><span class="unit">×</span></div></div>
+        <label class="toggle"><input type="checkbox" id="ovShadow"> Soft shadow under it</label>
+        <label class="toggle"><input type="checkbox" id="ovGraded"> Same color grade as the picture</label>
       </details>
 
       <details open class="tts-only">
@@ -236,17 +297,17 @@
         <div class="field"><label>Volume <span class="hint">under the narration</span></label><div class="slider-num"><input type="range" id="mVolume" min="0" max="100" step="1"><input type="number" class="num" data-for="mVolume" min="0" max="100" step="1"><span class="unit">%</span></div></div>
         <div class="field"><label>Fade out at the end</label><div class="slider-num"><input type="range" id="mFade" min="0" max="10" step="0.5"><input type="number" class="num" data-for="mFade" min="0" max="10" step="0.5"><span class="unit">s</span></div></div>
         <label class="toggle"><input type="checkbox" id="mDuck"> Lower the music while the narrator speaks</label>
+        <label class="toggle"><input type="checkbox" id="mRadio"> Sound like it's playing from the radio</label>
         <p class="muted small">Heard in Preview video and the exported MP4.</p>
       </details>
 
       <details open class="tts-only">
         <summary>Intro sound</summary>
         <label class="toggle"><input type="checkbox" id="iEnabled"> Play a sound before the voice starts</label>
-        <div class="field"><label>Sound <span class="hint">plays over the first image; the voice and music start after it</span></label>
-          <div class="row ep-row"><span id="iName" class="ep-name">Cassette play</span>
+        <div class="field"><label>Sound <span class="hint">at the very start; the rest plays under the voice</span></label>
+          <div class="row ep-row"><select id="iBuiltin"></select>
             <button class="btn sm" id="btnIntroPick">Choose…</button>
-            <button class="icon-btn" id="btnIntroPlay" title="Listen">▶</button>
-            <button class="icon-btn" id="btnIntroReset" title="Back to the cassette sound" hidden>↺</button></div></div>
+            <button class="icon-btn" id="btnIntroPlay" title="Listen">▶</button></div></div>
         <div class="field"><label>Voice starts after <span class="hint">0.7 s = right after the click; the rest plays under the voice</span></label><div class="slider-num"><input type="range" id="iVoiceAt" min="0" max="5" step="0.1"><input type="number" class="num" data-for="iVoiceAt" min="0" max="5" step="0.1"><span class="unit">s</span></div></div>
         <label class="toggle"><input type="checkbox" id="iTape"> Keep the cassette playing (tape hiss) under the whole video</label>
         <div class="field"><label>Volume</label><div class="slider-num"><input type="range" id="iVolume" min="0" max="100" step="1"><input type="number" class="num" data-for="iVolume" min="0" max="100" step="1"><span class="unit">%</span></div></div>
