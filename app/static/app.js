@@ -1875,12 +1875,23 @@ function sceneShots(upTo) {
         const alt = { insert: "medium_wide" }[shot];
         shot = alt && alt !== shots[k - 1] ? alt : SHOT_ROTATION.find((s) => s !== shots[k - 1] && s !== shot);
       }
+      // A tiny figure in a small room only works by inventing a huge empty hall: no extreme wide / high angle indoors.
+      if (VAST_SHOTS.has(shot) && smallIndoor(sc.place))
+        shot = ["wide", "framed", "medium_wide", "profile"].find((s) => s !== shots[k - 1]);
     }
     shots.push(shot);
   }
   return shots;
 }
 const sceneShot = (i) => sceneShots(i)[i];
+const VAST_SHOTS = new Set(["extreme_wide", "high"]);
+/* A place inside a room or building (places.txt "home:" lines, or named like one). */
+function smallIndoor(place) {
+  if (!place) return false;
+  if (placeList().find((p) => p.text === place)?.home) return true;
+  return /\b(inside|room|bedroom|kitchen|entryway|hallway|corridor|laundromat|library|classroom|coffee shop|cafe|carriage|window seat|apartment)\b/i.test(place)
+    && !/\b(street|road|rooftop|park|field)\b/i.test(place);
+}
 
 /* The narration of the scenes before this one (most recent kept in full), so each image continues the story. */
 function storySoFar(i, limit = 1800) {
@@ -1992,14 +2003,18 @@ function randomPeopleLook() {
   const who = pick(["a woman in her twenties", "a man in his twenties", "a teenage girl", "a teenage boy",
     "a woman in her thirties", "a man in his thirties", "a woman in her forties", "a man in his forties",
     "an older woman with grey hair", "an older man with grey hair", "a young woman", "a young man"]);
-  const hair = pick(["short cropped hair", "a long braid", "a messy bob", "shoulder-length wavy hair", "a high ponytail",
-    "a buzz cut", "long straight hair", "curly hair", "a low bun", "short spiky hair", "a side part", "hair tied back loosely"]);
+  const hair = pick(["short cropped", "in a long braid", "in a messy bob", "shoulder-length and wavy", "in a high ponytail",
+    "very short", "long and straight", "curly", "in a low bun", "short and tousled", "neatly side-parted", "tied back loosely"]);
   const color = pick(["black", "dark brown", "chestnut", "auburn", "light brown", "ash brown", "deep red", "dark blue-black"]);
   const build = pick(["slim", "tall and lanky", "short and sturdy", "broad-shouldered", "average build", "petite"]);
-  const wear = pick(["a mustard raincoat", "a striped long-sleeve shirt", "a navy school uniform", "a green parka",
-    "a white work shirt with rolled sleeves", "an oversized grey hoodie", "a red scarf and a dark wool coat",
-    "a denim jacket", "overalls over a plain tee", "a beige trench coat", "a turtleneck sweater", "a loose flannel shirt"]);
-  return `${who}, ${build}, ${color} ${hair}, wearing ${wear}`;
+  // Soft, plain 90s clothes like the artstyle samples (oversized knits, loose shirts, turtlenecks, long coats) —
+  // never uniforms, workwear or sportswear. Variety comes from the garment and its color.
+  const wear = pick(["an oversized cream knit sweater", "a loose white button-up shirt with the sleeves rolled up",
+    "a chunky navy turtleneck sweater", "a long camel wool coat over a turtleneck", "a soft grey cardigan over a plain shirt",
+    "a rust-colored oversized knit sweater", "a dark wool coat and a knit scarf", "a forest-green cable-knit sweater",
+    "an oversized pale blue button-up shirt", "a mustard knit cardigan over a white shirt", "a loose oatmeal turtleneck",
+    "a long charcoal coat over a cream sweater", "a dusty-rose knit sweater", "a navy cardigan over a white collared shirt"]);
+  return `${who}, ${build}, ${color} hair ${hair}, wearing ${wear}`;
 }
 
 function fullImagePrompt(i, scenePrompt) {
@@ -2038,7 +2053,9 @@ function fullImagePrompt(i, scenePrompt) {
     "in this image is a NEW person invented for this image — never the people from the style examples. Draw them in the " +
     "art style (same line work, shading and proportions), but give them their own look: their own face, hairstyle, hair " +
     "color, age, build and clothes, clearly different from everyone in the style examples. The exact person to draw is " +
-    "given under WHO in THIS SCENE below.");
+    "given under WHO in THIS SCENE below. CLOTHES: the same kind of soft, plain, slightly oversized 90s clothes as the " +
+    "style examples (knit sweaters, loose shirts, cardigans, turtlenecks, long wool coats) — never school uniforms, " +
+    "workwear, overalls, sportswear, hoodies or modern fashion.");
   else if (!noPeople) parts.push("SAME DESIGN FOR EVERYONE: every person in the image — including extras, crowds, victims and people in the " +
     "background — is drawn with exactly the same simple character design as the style examples and character references " +
     "(characters with their own reference keep THEIR face and hair from it — the generic face from ART STYLE is only for " +
