@@ -328,7 +328,8 @@
         <summary>Timing</summary>
         <div class="grid2">
           <div class="field"><label>Pause after a full sentence <output id="oPauseSent"></output></label><input type="range" id="sPauseSent" min="0" max="3" step="0.05"></div>
-          <div class="field"><label>Pause after a comma or … <output id="oPauseOpen"></output></label><input type="range" id="sPauseOpen" min="0" max="2" step="0.05"></div>
+          <div class="field"><label>Pause after a question (?) <output id="oPauseQuest"></output></label><input type="range" id="sPauseQuest" min="0" max="3" step="0.05"></div>
+          <div class="field"><label>Pause after a comma or …<output id="oPauseOpen"></output></label><input type="range" id="sPauseOpen" min="0" max="2" step="0.05"></div>
           <div class="field"><label>Pause between sentences <output id="oSentPause"></output></label><input type="range" id="sSentPause" min="0" max="1" step="0.05"></div>
           <div class="field"><label>Lead-in before narration <output id="oLead"></output></label><input type="range" id="sLead" min="0" max="1" step="0.05"></div>
           <div class="field"><label>Hold at the end <output id="oEnd"></output></label><input type="range" id="sEnd" min="0.2" max="8" step="0.1"></div>
@@ -356,7 +357,7 @@
       </details>
       <div class="defaults-row">
         <button class="btn" id="btnSaveDefaults" title="New projects start with these settings (voice, subtitles, watermark, color grade, image fit, export…)">⭐ Save these settings as my default</button>
-        <button class="btn sm" id="btnResetDefaults" title="New projects start with StoryCraft's original settings again">Reset</button>
+        <button class="btn sm" id="btnResetDefaults" title="Put this project's settings back to your saved default">Reset</button>
       </div>
     </div>
   </aside>
@@ -491,6 +492,7 @@
       <div class="scene-controls">
         <button class="btn sm act-play" title="Hear this scene's narration">▶ Narration</button>
         <button class="btn sm act-image" title="Generate this scene's image with ChatGPT">🎨 Image</button>
+        <label class="no-people" title="When ticked, this scene's generated image will have no people or humans in it"><input type="checkbox" class="act-nopeople"> No people</label>
         <span class="duration" title="Scene length (from the generated narration)">—</span>
         <span class="rec-tools rec-only">
           <button class="icon-btn act-earlier" title="Start this scene a little earlier (0.1 s)">◂</button>

@@ -149,6 +149,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
 .script { resize: vertical; min-height: 84px; line-height: 1.5; font-size: 14.5px; }
 .scene-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .scene-icons { display: inline-flex; gap: 2px; margin-left: auto; }
+.no-people { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+.no-people:has(input:checked) { color: inherit; }
 .duration {
   font-variant-numeric: tabular-nums; font-size: 12.5px; padding: 3px 9px; border-radius: 99px;
   background: var(--bg); border: 1px solid var(--border); color: var(--muted);

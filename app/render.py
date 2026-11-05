@@ -52,7 +52,7 @@ DEFAULT_SETTINGS = {
               "volume": 40},                              # % (voice_loudness): 100 = as loud as TikTok / Reels
     # Pauses after a scene, by how it ends (like quote reels: ~1.6 s heard after a full stop, ~0.7 s after
     # a comma or "..."; the voice clips add ~0.3 s of their own). Lead-in 0: the picture cuts on the first word.
-    "timing": {"lead_in": 0.0, "pause_sentence": 1.25, "pause_open": 0.4, "sentence_pause": 0.2,
+    "timing": {"lead_in": 0.0, "pause_sentence": 1.25, "pause_question": 1.25, "pause_open": 0.4, "sentence_pause": 0.2,
                "end_hold": 3.0,   # music plays on after the last line, then the video ends
                "silent_scene": 3.0},       # seconds a scene with an image but no narration is shown
     "subtitles": {"enabled": True, "font": "Arial Black", "size": 84, "color": "#FFFFFF",
@@ -438,6 +438,11 @@ def ends_sentence(script):
     return end.endswith((".", "!", "?")) and not end.endswith(("..", "…"))
 
 
+def ends_question(script):
+    """True when the scene ends a sentence with a question mark (gets its own pause)."""
+    return ends_sentence(script) and (script or "").rstrip().rstrip("\"'”’)").endswith("?")
+
+
 def runs_on(script):
     """True when the scene visibly continues into the next one (a comma, dash, "..." at its end). A line
     with no punctuation at all (a quote written one line per scene) is a line of its own."""
@@ -477,8 +482,10 @@ def build_timeline(project, narration):
             if outro is not None:
                 tail += OUTRO_TAIL
         else:     # breathe after a finished sentence, move on quickly when the thought continues
-            done = ends_sentence(project["scenes"][i].get("script"))
-            tail = max(0.0, float(t["pause_sentence"] if done else t["pause_open"]))
+            script = project["scenes"][i].get("script")
+            done = ends_sentence(script)
+            key = ("pause_question" if ends_question(script) else "pause_sentence") if done else "pause_open"
+            tail = max(0.0, float(t[key]))
         pre = lead_in + (intro_len if i == 0 else 0.0)
         frames = math.ceil((pre + item["speech"] + tail) * fps - 1e-6)
         scenes.append({**item, "start_frame": frame, "frames": frames, "pre": pre,

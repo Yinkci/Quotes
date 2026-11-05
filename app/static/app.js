@@ -114,7 +114,9 @@ function sceneDuration(index) {
   const m = s.music, musicOn = m.enabled && m.file && +m.volume > 0;     // the music fades out after the hold
   const click = s.outro?.click && +s.intro.volume > 0 ? 0.5 : 0;     // OUTRO_TAIL: the radio clicks off
   const tail = last ? Math.max(0.2, +s.timing.end_hold) + (musicOn ? Math.max(0, +m.fade_out) : 0) + click
-    : Math.max(0, +(endsSentence(sc.script) ? s.timing.pause_sentence : s.timing.pause_open));
+    : Math.max(0, +(!endsSentence(sc.script) ? s.timing.pause_open
+      : /\?$/.test((sc.script || "").trimEnd().replace(/["'”’)]+$/, "")) ? (s.timing.pause_question ?? s.timing.pause_sentence)
+      : s.timing.pause_sentence));
   const io = s.intro, intro = index === 0 && io?.enabled && io.file && +io.volume > 0     // the voice waits this long
     ? Math.min(+io.length || 0, Math.max(0, +(io.voice_at ?? 0.7))) : 0;
   return Math.ceil((+s.timing.lead_in + intro + n.speech + tail) * fps - 1e-6) / fps;
@@ -312,6 +314,9 @@ function sceneElement(sc, i) {
   $(".act-down", el).addEventListener("click", () => moveScene(i, i + 1));
   $(".act-play", el).addEventListener("click", (e) => playScene(i, e.currentTarget));
   $(".act-image", el).addEventListener("click", () => openImageModal(i));
+  const noPeople = $(".act-nopeople", el);
+  noPeople.checked = !!sc.no_people;
+  noPeople.addEventListener("change", () => { sc.no_people = noPeople.checked; markDirty(); });
 
   // drag to reorder (only from the handle) + drop an image file to replace
   const handle = $(".handle", el);
@@ -465,7 +470,7 @@ const BIND = [
   ["txGrain", "texture", "grain", "num"], ["txVignette", "texture", "vignette", "num"],
   ["ovSize", "overlay", "size", "num"], ["ovOpacity", "overlay", "opacity", "num"],
   ["cStrength", "color", "strength", "num"],
-  ["sPauseSent", "timing", "pause_sentence", "num", "oPauseSent", sec], ["sPauseOpen", "timing", "pause_open", "num", "oPauseOpen", sec], ["sSentPause", "timing", "sentence_pause", "num", "oSentPause", sec],
+  ["sPauseSent", "timing", "pause_sentence", "num", "oPauseSent", sec], ["sPauseQuest", "timing", "pause_question", "num", "oPauseQuest", sec], ["sPauseOpen", "timing", "pause_open", "num", "oPauseOpen", sec], ["sSentPause", "timing", "sentence_pause", "num", "oSentPause", sec],
   ["sLead", "timing", "lead_in", "num", "oLead", sec], ["sEnd", "timing", "end_hold", "num", "oEnd", sec],
   ["sSilent", "timing", "silent_scene", "num", "oSilent", sec],
   ["sOutDir", "export", "output_dir"], ["sFilename", "export", "filename"],
@@ -1557,13 +1562,24 @@ $("#btnSaveDefaults").addEventListener("click", async () => {
     toast("Saved. Every new project now starts with these settings.");
   } catch (e) { showMessage("Could not save the defaults", e.message); }
 });
+// Settings that belong to this project only: a reset leaves them alone (same as NOT_DEFAULTS in render.py).
+const KEEP_ON_RESET = { story: null, export: ["filename", "output_dir"], imagegen: ["references"] };
 $("#btnResetDefaults").addEventListener("click", async () => {
-  if (!(await confirmBox("Reset the defaults?", "New projects will start with StoryCraft's original settings again. This project keeps its settings.", "Reset"))) return;
+  if (!(await confirmBox("Reset to your default?", "This project's settings go back to the ones you saved with ⭐ Save these settings as my default. The script, scenes and images stay as they are.", "Reset"))) return;
   try {
-    await api("/api/defaults/reset", {});
-    STATUS = await api("/api/status");
-    toast("New projects now start with StoryCraft's original settings.");
-  } catch (e) { showMessage("Could not reset the defaults", e.message); }
+    STATUS = await api("/api/status");      // the latest saved default
+    const before = clone(S());
+    for (const k of Object.keys(STATUS.defaults)) {
+      const keep = KEEP_ON_RESET[k];
+      if (keep === null) continue;
+      const kept = Object.fromEntries((keep || []).filter((f) => f in (before[k] || {})).map((f) => [f, before[k][f]]));
+      S()[k] = { ...clone(STATUS.defaults[k]), ...kept };
+    }
+    settingsToUI(); markDirty(); renderScenes(); updatePreviewStale();
+    toast("Settings are back to your saved default.", "Undo", () => {
+      state.project.settings = before; settingsToUI(); markDirty(); renderScenes(); updatePreviewStale();
+    }, 8000);
+  } catch (e) { showMessage("Could not reset the settings", e.message); }
 });
 
 /* ---- color grade: one .cube LUT over the whole video ---- */
@@ -1710,6 +1726,7 @@ function nameMentioned(text, name) {
 /* Which characters appear: a per-scene choice if the user made one, else main + names in the narration. */
 function sceneCharacters(i, promptText) {
   const sc = state.project.scenes[i], chars = usableCharacters();
+  if (sc?.no_people) return [];          // "No people" ticked: no characters, no character reference images
   if (Array.isArray(sc.image_characters)) return chars.filter((c) => sc.image_characters.includes(c.id));
   const text = `${promptText ?? ""} ${sc.script || ""}`;
   return chars.filter((c) => c.main || nameMentioned(text, c.name));
@@ -1805,6 +1822,7 @@ const SHOTS = {
   extreme_wide: ["Extreme wide", "EXTREME WIDE SHOT: the camera far away; the place fills the image and the character is tiny in it."],
   wide: ["Wide", "WIDE SHOT: the character's whole body and plenty of their surroundings; the character takes up about a quarter of the image height."],
   medium_wide: ["Medium wide", "MEDIUM WIDE SHOT: closer — the character's whole body (or from the knees up) with some surroundings; the character takes up about a third of the image height, never more."],
+  medium: ["Medium (close)", "MEDIUM SHOT: close to the character, from the waist up; they are big, taking up half the image height or more, with their face, hands and what they do in the upper part of the image, and their body simply continuing down out of the frame. Some of the place is still visible around them."],
   framed: ["Framed (foreground)", "FRAMED SHOT: the camera looks past dark, out-of-the-way shapes close to the lens — whatever this place has (an edge of a wall or door frame, a pillar, a plant, a tree, a parked car) — that frame the view on one or more sides, so the viewer seems to be quietly watching from a distance."],
   perspective: ["Deep perspective", "DEEP PERSPECTIVE SHOT: eye-level, one-point perspective; the lines of the place (walls, floor, road, rails, ceiling, lamps) run straight into the distance; the character is small and off to one side."],
   behind: ["From behind", "FROM-BEHIND SHOT: the camera behind the character (back or three-quarter back view), at a distance, so we see what they are facing."],
@@ -1812,7 +1830,7 @@ const SHOTS = {
   high: ["High angle", "HIGH-ANGLE SHOT: the camera above, looking down on the character and the layout of the place; the character small."],
   insert: ["Detail insert", "DETAIL INSERT: a close view of the one object from the narration that matters most; the character absent or only small and far behind it."],
 };
-const SHOT_ROTATION = ["wide", "framed", "behind", "perspective", "medium_wide", "profile", "extreme_wide", "high", "insert"];
+const SHOT_ROTATION = ["wide", "medium", "framed", "behind", "perspective", "medium_wide", "profile", "medium", "extreme_wide", "high", "insert"];
 const SHOT_CUES = [
   ["insert", /\b(cup|tea|coffee|book|letter|note|phone|photo|picture|clock|keys?|candle|gift|ring)\b/],
 ];
@@ -1965,7 +1983,15 @@ function fullImagePrompt(i, scenePrompt) {
     parts.push(`CHARACTERS WHO CAN APPEAR (draw them as in their reference images):\n${chars.map((c) => `- ${(c.name || "Main character").trim()}${c.description ? `: ${c.description.trim()}` : ""}`).join("\n")}` +
       (main ? `\nThe story is told in the second person: "you" is ${(main.name || "the main character").trim()}.` : ""));
   }
-  parts.push("SAME DESIGN FOR EVERYONE: every person in the image — including extras, crowds, victims and people in the " +
+  const noPeople = !!state.project.scenes[i]?.no_people;
+  if (noPeople) parts.push("NO PEOPLE (most important rule — it wins over everything else in this prompt): this image " +
+    "contains NO people or humans at all — no characters, no crowds, no passers-by, no figures in the distance, no " +
+    "silhouettes, shadows or reflections of people, no hands, arms, feet or other body parts, and no faces on screens, " +
+    "posters or photos. Show the moment only through the place, objects and atmosphere (for example an empty room, a " +
+    "street, a cup on a table, a phone lying on a bed). The style examples may show people: copy only their drawing " +
+    "style, never the people. Wherever the CAMERA SHOT or other rules mention 'the character', apply it to the main " +
+    "object or the place instead.");
+  if (!noPeople) parts.push("SAME DESIGN FOR EVERYONE: every person in the image — including extras, crowds, victims and people in the " +
     "background — is drawn with exactly the same simple character design as the style examples and character references " +
     "(characters with their own reference keep THEIR face and hair from it — the generic face from ART STYLE is only for " +
     "everyone else). " +
@@ -1973,7 +1999,7 @@ function fullImagePrompt(i, scenePrompt) {
     "the EXTRA RULES say otherwise for them. People who already appeared in earlier scenes keep exactly " +
     "the same hairstyle, clothes, accessories and colors as before (see the previous scene images and STORY SO FAR) — except " +
     "that a character's own reference image always overrides how earlier images drew them.");
-  parts.push("ANATOMY: every person has exactly two arms and two legs — never an extra arm or leg, and never a limb merged " +
+  if (!noPeople) parts.push("ANATOMY: every person has exactly two arms and two legs — never an extra arm or leg, and never a limb merged " +
     "into the body. Count them. Each arm clearly starts at that person's shoulder and each leg at the bottom of their body.");
   const previously = IG().continuity !== false ? previousEpisodesText() : "";
   if (previously) parts.push(`PREVIOUS EPISODES (this episode continues the story; for context only):
@@ -2016,10 +2042,13 @@ ${previously}`);
   if (!newPlace) parts.push("WHERE EVERYONE IS: keep every character where the story puts them. If the previous image showed something the " +
     "main character was watching (for example through a window or from a distance), the main character is still where they " +
     "were watching from — not out there — unless the narration says they moved.");
-  parts.push("FOCUS: make the main subject of THIS SCENE's narration the center of attention (for example the event being noticed, " +
+  parts.push(noPeople
+    ? "FOCUS: make the main subject of THIS SCENE's narration the center of attention, shown through an object, a place " +
+      "or what is happening around it — never through a person."
+    : "FOCUS: make the main subject of THIS SCENE's narration the center of attention (for example the event being noticed, " +
     "or the action happening). The main character does not have to be in the middle of the frame, and may be only partly " +
     "visible or not visible at all when the shot calls for it.");
-  parts.push("NO LINEUPS (important): when two or more people appear, scatter them through the depth " +
+  if (!noPeople) parts.push("NO LINEUPS (important): when two or more people appear, scatter them through the depth " +
     "of the scene like a real moment, not a parade: one close to the camera (big in the frame), others in the middle distance " +
     "and far away (small), at uneven gaps, some overlapping or half-hidden behind cars, walls or each other. They face and move " +
     "in different directions and do different things (one shuffling toward the camera, one turned away, one bent over " +
@@ -2030,22 +2059,27 @@ ${previously}`);
   const BAG = /\b(back ?packs?|rucksacks?|knapsacks?|duffel|bags?)\b/i;
   const bagInStory = BAG.test(`${scenePrompt} ${state.project.scenes[i]?.script || ""}`) ||
     state.project.scenes.slice(0, i).some((s) => BAG.test(s.script || ""));
-  if (!bagInStory) parts.push("NO BAGS: nobody in this image wears or carries a backpack, bag or satchel — not the main " +
+  if (!bagInStory && !noPeople) parts.push("NO BAGS: nobody in this image wears or carries a backpack, bag or satchel — not the main " +
     "character, not anyone else — even if a reference image, style example or earlier image shows one. Remove it and " +
     "draw their back and shoulders without straps.");
   parts.push("COMPOSITION: exactly 9:16 vertical portrait (941x1672), taller than wide — never landscape or square. Use the " +
     "height: layer the scene from foreground to background (near things at the bottom or edges, the subject in the middle " +
     "distance, the far part of the place above). Keep the important action inside the frame with a little margin.");
   // The radio overlay covers the bottom of every video: keep people out of it and give the radio something to sit on.
-  if (S().overlay.enabled) parts.push("RADIO SPACE: an old cassette radio will be placed over the BOTTOM 30% of this image. " +
-    "No person or animal may be in that area — nobody standing, sitting or lying there, and no feet or legs reaching " +
-    "into it. Every person is fully in the upper 70%, feet included: further back in the scene, on higher ground, or " +
-    "shown from the waist up. Fill the bottom 30% with simple, calm foreground the radio can sit on: a floor, a ledge, " +
-    "a table top, a rock, grass, sand or a path — no faces, hands or important objects there.");
+  if (S().overlay.enabled && noPeople) parts.push("RADIO SPACE: an old cassette radio will be placed over the BOTTOM 30% of this image. " +
+    "Keep the main subject and anything important in the upper 70%. Fill the bottom 30% with simple, calm foreground the " +
+    "radio can sit on: a floor, a ledge, a table top, a rock, grass, sand or a path.");
+  else if (S().overlay.enabled) parts.push("RADIO SPACE: an old cassette radio will be placed over the BOTTOM 30% of this image. " +
+    "Faces, hands and whatever the characters are doing must be in the upper 70%. A big, close character is fine: " +
+    "seen from the waist up, their body simply continues down behind the radio (only their clothes reach the bottom " +
+    "30%). A small, far character stands further back or on higher ground, so their whole figure, feet included, is " +
+    "above the bottom 30%. Never a full standing figure whose legs and feet are in the bottom 30%. Fill the rest of " +
+    "the bottom 30% with simple, calm foreground the radio can sit on: a floor, a ledge, a table top, a rock, grass, " +
+    "sand or a path — no faces, hands or important objects there.");
   // With a world mood, drop the "avoid" items that would forbid it (dramatic lighting, light sources, rain, detailed backgrounds).
   const avoid = (ART.avoid || "").split(",").map((s) => s.trim())
     .filter((s) => s && !(world && /dramatic lighting|glowing light|light rays|rain|detailed rendering|detailed textures/i.test(s))).join(", ");
-  const never = [avoid, bagInStory ? "" : "backpacks or bags on anyone", IG().no_text ? "any text, letters, captions, speech bubbles, logos or watermarks" : ""].filter(Boolean);
+  const never = [avoid, noPeople ? "any person, human, figure, silhouette, face or body part" : bagInStory ? "" : "backpacks or bags on anyone",IG().no_text ? "any text, letters, captions, speech bubbles, logos or watermarks" : ""].filter(Boolean);
   if (never.length) parts.push(`NEVER DRAW: ${never.join("; ")}.`);
   return parts.join("\n\n");
 }
@@ -2125,7 +2159,7 @@ $("#imgShot").addEventListener("change", (e) => {
 
 function renderImageChars() {
   const i = ig.modalIndex, box = $("#imgChars"), chars = usableCharacters();
-  $("#imgCharsField").hidden = !chars.length;
+  $("#imgCharsField").hidden = !chars.length || !!state.project.scenes[i]?.no_people;
   box.innerHTML = "";
   const active = new Set(sceneCharacters(i, $("#imgPrompt").value).map((c) => c.id));
   chars.forEach((c) => {
