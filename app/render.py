@@ -433,21 +433,21 @@ def narrate_recording(project, job, progress_span=(0.0, 1.0)):
 
 
 def ends_sentence(script):
-    """True when the scene ends a sentence (. ! ?), False when it runs on (comma, "...", nothing)."""
-    end = (script or "").rstrip().rstrip("\"'”’)")
-    return end.endswith((".", "!", "?")) and not end.endswith(("..", "…"))
+    """True when the scene ends a sentence (. ! ? or Japanese 。！？), False when it runs on (comma, "...", nothing)."""
+    end = (script or "").rstrip().rstrip("\"'”’)」』）")
+    return end.endswith((".", "!", "?", "。", "！", "？")) and not end.endswith(("..", "…"))
 
 
 def ends_question(script):
     """True when the scene ends a sentence with a question mark (gets its own pause)."""
-    return ends_sentence(script) and (script or "").rstrip().rstrip("\"'”’)").endswith("?")
+    return ends_sentence(script) and (script or "").rstrip().rstrip("\"'”’)」』）").endswith(("?", "？"))
 
 
 def runs_on(script):
     """True when the scene visibly continues into the next one (a comma, dash, "..." at its end). A line
     with no punctuation at all (a quote written one line per scene) is a line of its own."""
-    end = (script or "").rstrip().rstrip("\"'”’)")
-    return end.endswith((",", ";", ":", "—", "–", "-", "..", "…"))
+    end = (script or "").rstrip().rstrip("\"'”’)」』）")
+    return end.endswith((",", ";", ":", "—", "–", "-", "..", "…", "、", "，"))
 
 
 def build_timeline(project, narration):

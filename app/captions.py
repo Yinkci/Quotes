@@ -6,8 +6,50 @@ import re
 
 ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "st", "jr", "sr", "vs", "etc", "prof", "mt", "no",
                  "approx", "e.g", "i.e", "a.m", "p.m", "u.s", "lt", "sgt", "capt", "gen"}
-SOFT_BREAK = re.compile(r"[,;:—–…]+[\"'”’)\]]*$|-{2,}$")
+SOFT_BREAK = re.compile(r"[,;:—–…、，；：]+[\"'”’)\]」』）]*$|-{2,}$")
 HAS_WORD = re.compile(r"\w")
+
+# Japanese / Chinese: no spaces between words, and their own punctuation (。！？ end a sentence, 、 is a comma).
+CJK = re.compile(r"[぀-ヿ㐀-鿿豈-﫿ｦ-ﾟ]")
+CJK_CHUNK = 3          # characters per "word" for spaceless text (captions and timing work on these)
+CJK_CAPTION = 9        # about this many characters per caption line for spaceless text
+
+
+def split_words(text):
+    """Words of a sentence. Normal text: split at spaces. Spaceless text (Japanese, Chinese): short chunks
+    of CJK_CHUNK characters, cut after each 、。！？ so punctuation stays with the chunk before it.
+    Splitting text joined with spaces gives the same words as splitting each part (final_sentence relies on it)."""
+    out = []
+    for run in (text or "").split():
+        if not CJK.search(run):
+            out.append(run)
+            continue
+        for clause in re.findall(r"[^、，。！？!?…]+[、，。！？!?…」』）\"”’)]*|[、，。！？!?…」』）\"”’)]+", run):
+            m = re.match(r"(.*?)([、，。！？!?…」』）\"”’)]*)$", clause)
+            body, punct = m.group(1), m.group(2)
+            pieces = [body[k:k + CJK_CHUNK] for k in range(0, len(body), CJK_CHUNK)] or [""]
+            if len(pieces) > 1 and len(pieces[-1]) == 1:       # no lone 1-character chunk at the end
+                pieces[-2] += pieces.pop()
+            pieces[-1] += punct
+            if pieces[-1] and not body and out and CJK.search(out[-1]):
+                out[-1] += pieces[-1]                           # punctuation alone joins the chunk before
+            else:
+                out += [p for p in pieces if p]
+    return out
+
+
+def join_words(words):
+    """Inverse of split_words for display: no space between two Japanese/Chinese chunks."""
+    text = ""
+    for w in words:
+        text += w if text and _cjk_edge(text[-1], w[0]) else (" " + w if text else w)
+    return text
+
+
+def _cjk_edge(a, b):
+    """True when the boundary between characters a and b is inside spaceless text."""
+    cjk_or_punct = lambda c: bool(CJK.search(c)) or c in "、，。！？」』）「『（…"  # noqa: E731
+    return cjk_or_punct(a) and cjk_or_punct(b)
 
 
 def split_sentences(text, lines=False):
@@ -23,7 +65,7 @@ def split_sentences(text, lines=False):
             continue
         # Cut after . ! ? or an ellipsis (plus any closing quotes) followed by whitespace.
         parts, start = [], 0
-        for match in re.finditer(r"[.!?…]+[\"'”’)\]]*\s+", paragraph):
+        for match in re.finditer(r"[.!?…]+[\"'”’)\]]*\s+|[。！？]+[\"'”’)\]」』）]*\s*", paragraph):
             parts.append(paragraph[start:match.end()].strip())
             start = match.end()
         parts.append(paragraph[start:].strip())
@@ -101,11 +143,14 @@ def split_phrases(words, target):
 def build_captions(words, word_times, target, offset=0.0):
     """Turn per-word timings into caption events: [{'start','end','text'}] (seconds)."""
     events = []
+    cjk = [w for w in words if CJK.search(w)]
+    if cjk and len(cjk) * 2 >= len(words):      # mostly spaceless text: aim for ~CJK_CAPTION characters
+        target = max(1, round(CJK_CAPTION / (sum(map(len, cjk)) / len(cjk))))
     for group in split_phrases(words, target):
         start = word_times[group[0]][0]
         end = max(word_times[i][1] for i in group)
         events.append({"start": offset + start, "end": offset + end,
-                       "text": " ".join(words[i] for i in group)})
+                       "text": join_words(words[i] for i in group)})
     return events
 
 

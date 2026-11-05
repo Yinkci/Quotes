@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .captions import build_captions, split_sentences
+from .captions import CJK, build_captions, split_sentences, split_words
 
 SAMPLE_RATE = 24000
 FRAME_SAMPLES = 600       # one Kokoro duration unit = 600 samples (25 ms)
@@ -201,6 +201,9 @@ def _align_words(words, api_words, starts, ends, total):
     for w in words:                           # walk both lists, joining API words until they match ours
         target, got, s = norm(w), "", None
         while j < len(api_words) and (not target or len(got) < len(target)):
+            if s is None and target and not norm(api_words[j]):
+                j += 1                        # punctuation left over from the word before (a lone 、)
+                continue
             s = starts[j] if s is None else s
             got += norm(api_words[j])
             e = ends[j]
@@ -356,16 +359,25 @@ class ElevenLabs:
         chars, st, en = al.get("characters") or [], al.get("character_start_times_seconds") or [], \
             al.get("character_end_times_seconds") or []
         total = len(audio) / SAMPLE_RATE
-        if len(chars) == len(text) == len(st) == len(en):
-            spans = [(m.start(), m.end() - 1) for m in re.finditer(r"\S+", text)]
+        spans, pos = [], 0
+        for w in words:                       # where each of our words sits in the text sent
+            a = text.find(w, pos)
+            if a < 0:
+                spans = None
+                break
+            spans.append((a, a + len(w) - 1))
+            pos = a + len(w)
+        if spans is not None and len(chars) == len(text) == len(st) == len(en):
             return audio, [(float(st[a]), float(max(st[a], en[b]))) for a, b in spans]
         # Character list doesn't line up with our text: rebuild words from it and align by spelling.
         api_words, starts, ends, cur, s = [], [], [], "", None
         for ch, a, b in zip(chars, st, en):
-            if ch.isspace():
+            if ch.isspace() or CJK.search(ch):     # spaceless text: every character is its own "word"
                 if cur:
                     api_words.append(cur); starts.append(s); ends.append(prev_end)
                 cur, s = "", None
+                if not ch.isspace():
+                    api_words.append(ch); starts.append(a); ends.append(b)
             else:
                 cur += ch; s = a if s is None else s; prev_end = b
         if cur:
@@ -658,13 +670,15 @@ class Narrator:
     def sentence(self, text, voice, speed, emotion=None, context=None):
         """Audio + per-word timings for one sentence, from cache when possible.
         Returns (audio, words, times, was_cached)."""
-        words = text.split()
+        cloud_voice = is_cartesia(voice) or is_eleven(voice)
+        words = split_words(text) if cloud_voice else text.split()
         model = (f"cartesia:{CARTESIA_MODEL}" if is_cartesia(voice) else
                  f"eleven:{ElevenLabs.model}" if is_eleven(voice) else self._model_id())
         emotion = emotion if is_cartesia(voice) else None     # only Cartesia takes an emotion
         context = tuple(context) if is_eleven(voice) and context and any(context) else None
         parts = [CACHE_VERSION, model, voice, round(float(speed), 3), text] + ([emotion] if emotion else []) \
-            + ([list(context)] if context else [])
+            + ([list(context)] if context else []) \
+            + (["cjk-words"] if cloud_voice and CJK.search(text) else [])   # old one-word Japanese clips are made again
         key = hashlib.sha1(json.dumps(parts).encode()).hexdigest()
         path = self.cache_dir / f"{key}.npz"
         if path.exists():
@@ -692,10 +706,11 @@ class Narrator:
                 else:
                     audio, times = cloud.synth_words(text, words, voice, speed, context)
                     audio, times = self._cut_run_on(audio, times)
-                    if cut_off(self._trim(audio, times)[0]) and text.rstrip()[-1:] not in ".!?…":
+                    if cut_off(self._trim(audio, times)[0]) and text.rstrip()[-1:] not in ".!?…。！？":
                         # ElevenLabs sometimes stops mid-word on a short line with no end punctuation
                         # ("But remember"): ask again with a full stop, which gives the model an ending.
-                        audio, times = cloud.synth_words(text.rstrip() + ".", words, voice, speed, context)
+                        stop = "。" if CJK.search(text) else "."
+                        audio, times = cloud.synth_words(text.rstrip() + stop, words, voice, speed, context)
                         audio, times = self._cut_run_on(audio, times)
                 audio, times = self._trim(audio, times)
                 if cut_off(audio):
@@ -725,13 +740,14 @@ class Narrator:
         alone rises at the end, as if more follows), then cut into one piece per scene in the short pause the
         comma gives at each scene change. Takes up to FINAL_TAKES tries for an ending that falls.
         Returns [(audio, times)] per fragment."""
-        texts = [f.strip() if i == len(fragments) - 1 or f.rstrip()[-1:] in ",;:.…" else f.strip() + ","
-                 for i, f in enumerate(fragments)]
+        texts = [f.strip() if i == len(fragments) - 1 or f.rstrip()[-1:] in ",;:.…、，。" else
+                 f.strip() + ("、" if CJK.search(f) else ",") for i, f in enumerate(fragments)]
         # "person, Means accepting" -> "person, means accepting": a capital would read as a new sentence.
         texts = [t if i == 0 or not re.match(r"[A-Z][a-z]", t) or re.match(r"I\b", t) else t[0].lower() + t[1:]
                  for i, t in enumerate(texts)]
         key = hashlib.sha1(json.dumps([CACHE_VERSION, "final", ElevenLabs.model, voice, round(float(speed), 3),
-                                       texts, before]).encode()).hexdigest()
+                                       texts, before] + (["cjk-words"] if CJK.search(" ".join(texts)) else [])
+                                      ).encode()).hexdigest()
         path = self.cache_dir / f"{key}_final.npz"
         if path.exists():
             try:
@@ -745,7 +761,7 @@ class Narrator:
         with self._lock:
             best = None
             for _ in range(FINAL_TAKES):
-                audio, times = self.eleven.synth_words(joined, joined.split(), voice, speed, (before, ""))
+                audio, times = self.eleven.synth_words(joined, split_words(joined), voice, speed, (before, ""))
                 audio, times = self._cut_run_on(audio, times)
                 fall = ending_pitch(audio, times)
                 if best is None or (fall is not None and (best[2] is None or fall < best[2])):
@@ -754,7 +770,7 @@ class Narrator:
                     break
             audio, times = best[0], best[1]
             pieces, cut, w = [], 0, int(0.02 * SAMPLE_RATE)
-            counts = np.cumsum([len(t.split()) for t in texts])
+            counts = np.cumsum([len(split_words(t)) for t in texts])
             for i, n in enumerate(counts):
                 if i == len(counts) - 1:
                     end = len(audio)
@@ -796,7 +812,7 @@ class Narrator:
                 raise Cancelled()
             context = (units[i - 1][0] if i else around[0], units[i + 1][0] if i + 1 < len(units) else around[1])
             if last_unit and i == len(units) - 1:
-                (audio, times), words, cached = last_unit, sentence.split(), True
+                (audio, times), words, cached = last_unit, split_words(sentence), True
             else:
                 audio, words, times, cached = self.sentence(sentence, voice, speed, emotion, context)
             fresh += 0 if cached else 1

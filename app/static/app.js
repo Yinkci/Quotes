@@ -94,8 +94,8 @@ function recBounds() {
 
 /* True when a scene ends a sentence (. ! ?), not a comma, "..." or nothing (as ends_sentence on the server). */
 function endsSentence(script) {
-  const end = (script || "").trimEnd().replace(/["'”’)]+$/, "");
-  return /[.!?]$/.test(end) && !/(\.\.|…)$/.test(end);
+  const end = (script || "").trimEnd().replace(/["'”’)」』）]+$/, "");
+  return /[.!?。！？]$/.test(end) && !/(\.\.|…)$/.test(end);
 }
 
 /* Same formula as the server: lead-in + speech + pause, rounded up to whole frames. */
@@ -115,7 +115,7 @@ function sceneDuration(index) {
   const click = s.outro?.click && +s.intro.volume > 0 ? 0.5 : 0;     // OUTRO_TAIL: the radio clicks off
   const tail = last ? Math.max(0.2, +s.timing.end_hold) + (musicOn ? Math.max(0, +m.fade_out) : 0) + click
     : Math.max(0, +(!endsSentence(sc.script) ? s.timing.pause_open
-      : /\?$/.test((sc.script || "").trimEnd().replace(/["'”’)]+$/, "")) ? (s.timing.pause_question ?? s.timing.pause_sentence)
+      : /[?？]$/.test((sc.script || "").trimEnd().replace(/["'”’)」』）]+$/, "")) ?(s.timing.pause_question ?? s.timing.pause_sentence)
       : s.timing.pause_sentence));
   const io = s.intro, intro = index === 0 && io?.enabled && io.file && +io.volume > 0     // the voice waits this long
     ? Math.min(+io.length || 0, Math.max(0, +(io.voice_at ?? 0.7))) : 0;
