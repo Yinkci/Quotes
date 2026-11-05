@@ -21,7 +21,22 @@ import threading
 import time
 from pathlib import Path
 
-from .config import CONFIG, MEDIA_DIR
+from .config import CONFIG, MEDIA_DIR, WORKSPACE
+
+LOG_DIR = WORKSPACE / "imagegen_logs"     # the prompt sent + what Codex did, per image (newest 40 kept)
+
+
+def _log(started, prompt, refs, events, result):
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        name = time.strftime("%Y%m%d-%H%M%S", time.localtime(started)) + ".txt"
+        body = (f"RESULT: {result}\nREFERENCES:\n" + "".join(f"  {r}\n" for r in refs) +
+                "\n===== PROMPT SENT TO CODEX =====\n" + prompt + "\n\n===== CODEX EVENTS =====\n" + "".join(events))
+        (LOG_DIR / name).write_text(body, encoding="utf-8")
+        for old in sorted(LOG_DIR.glob("*.txt"))[:-40]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 IMAGE_TIMEOUT = 420
@@ -225,7 +240,10 @@ def generate(prompt, references=(), cancelled=None, on_progress=None):
         ref_note = (" Images are attached as references; the request below explains what each one shows, in order."
                     if refs else "")
         instructions = (f"Use your image generation tool exactly once to create the image described below at {size}."
-                        f"{ref_note} Do not run commands, read or write files, or browse. If the request cannot be "
+                        f"{ref_note} When you write the prompt for the image tool, keep every concrete detail of the "
+                        "request: the art style, the place, and above all the WHO line — the person's exact age, "
+                        "gender, build, hair and clothes, word for word. Never swap in a person from the reference "
+                        "images or one of your own. Do not run commands, read or write files, or browse. If the request cannot be "
                         "generated (for example a safety refusal), do not generate anything else instead. Then reply "
                         'only with JSON: {"generated": true, "problem": null} after generating, or '
                         '{"generated": false, "problem": "<short reason>"}.')
@@ -235,7 +253,7 @@ def generate(prompt, references=(), cancelled=None, on_progress=None):
                                 encoding="utf-8", errors="replace", env=_env(), creationflags=NO_WINDOW)
         proc.stdin.write(instructions + "\n\n" + prompt)
         proc.stdin.close()
-        thread, limit, errors, failure = None, False, [], ""
+        thread, limit, errors, failure, events = None, False, [], "", []
         reader = threading.Thread(target=lambda: errors.extend(proc.stderr.readlines()), daemon=True)
         reader.start()
         watchdog = threading.Timer(IMAGE_TIMEOUT, proc.kill)
@@ -250,6 +268,7 @@ def generate(prompt, references=(), cancelled=None, on_progress=None):
         threading.Thread(target=stop_if_cancelled, daemon=True).start()
         try:
             for line in proc.stdout:
+                events.append(line if len(line) < 4000 else line[:4000] + " …(cut)\n")
                 try:
                     event = json.loads(line)
                 except ValueError:
@@ -270,6 +289,8 @@ def generate(prompt, references=(), cancelled=None, on_progress=None):
         finally:
             watchdog.cancel()
         reader.join(timeout=5)
+        _log(started, instructions + "\n\n" + prompt, refs, events + ["\n----- stderr -----\n"] + errors,
+             f"exit {proc.returncode}")
         if cancelled and cancelled():
             raise Cancelled()
         if time.time() - started >= IMAGE_TIMEOUT - 1:

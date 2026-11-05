@@ -1306,6 +1306,30 @@ document.addEventListener("keydown", (e) => {
 });
 window.addEventListener("beforeunload", () => scheduleAutosave());
 
+/* An open tab keeps running the code it loaded. When the app's files change on disk, offer a reload
+   (the project is autosaved and comes back after it), so new prompt rules etc. are really used. */
+const CODE_FILES = ["/static/app.js", "/static/app.css", "/static/script_split.js", "/static/index.html"];
+async function codeSignature() {
+  try {
+    const tags = await Promise.all(CODE_FILES.map((u) => fetch(u, { method: "HEAD", cache: "no-store" })
+      .then((r) => `${r.headers.get("etag") || ""}|${r.headers.get("last-modified") || ""}`)));
+    return tags.join(";");
+  } catch { return null; }
+}
+let loadedCode = null;
+codeSignature().then((sig) => { loadedCode = sig; });
+async function checkCodeUpdate() {
+  if (!loadedCode || !$("#toast").hidden) return;      // shown again later if another message replaced it
+  const now = await codeSignature();
+  if (!now || now === loadedCode) return;
+  toast("The app was updated. Reload to use the new version (your project is kept).", "Reload", () => {
+    scheduleAutosave();
+    setTimeout(() => location.reload(), 500);
+  }, 600000);
+}
+window.addEventListener("focus", checkCodeUpdate);
+setInterval(checkCodeUpdate, 60000);
+
 /* ---------------------------------------------------------------- add / drop */
 $("#addImages").addEventListener("change", (e) => { if (e.target.files.length) addImagesAsScenes(e.target.files); e.target.value = ""; });
 $("#btnAddEmpty").addEventListener("click", () => {
@@ -1767,11 +1791,13 @@ function referencePlan(i, promptText) {
   const free = MAX_REFS - chars.length - (grouped.length ? 1 : 0);
   const prevCount = continuity ? (free >= 4 && ok(prev2) ? 2 : 1) : 0;
   const moody = false;      // no episode "world" text in quote reels   // the episode's world text sets colors and mood
-  add(styleExamples(i, free - prevCount), "ART STYLE examples. Copy ONLY their drawing style — line work, character proportions, " +
+  add(styleExamples(i, Math.min(3, free - prevCount)), "ART STYLE examples. Copy ONLY their drawing style — line work, character proportions, " +
     (moody ? "and the flat way shapes are colored and shaded (NOT their colors, brightness or cozy mood: those come from " +
       "THE WORLD RIGHT NOW)" : "color palette and shading") +
     " — so the new image looks like it comes from the same series. Do NOT copy their places, objects, " +
-    "weather or how clean and normal things look: where we are and what state it is in come from the story.");
+    "weather or how clean and normal things look: where we are and what state it is in come from the story. " +
+    "The PEOPLE in these examples are NOT characters of this video: never copy their faces, hairstyles, hair colors, " +
+    "clothes, ages or body types — copy only HOW people are drawn (the line work and shading), and invent new people.");
   // The two previous scenes (when there's room): the place, and how each person who already appeared looks.
   // Two, because the last shot may be a close-up (a phone, a face) that doesn't show everyone.
   if (continuity) {
@@ -1959,6 +1985,23 @@ function choosePlace(i) {
   return from[Math.floor(Math.random() * from.length)].text;
 }
 
+/* A random look for the people in one image, so each video (and each "Generate again") gets different people
+   instead of the ones in the style examples. */
+function randomPeopleLook() {
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  const who = pick(["a woman in her twenties", "a man in his twenties", "a teenage girl", "a teenage boy",
+    "a woman in her thirties", "a man in his thirties", "a woman in her forties", "a man in his forties",
+    "an older woman with grey hair", "an older man with grey hair", "a young woman", "a young man"]);
+  const hair = pick(["short cropped hair", "a long braid", "a messy bob", "shoulder-length wavy hair", "a high ponytail",
+    "a buzz cut", "long straight hair", "curly hair", "a low bun", "short spiky hair", "a side part", "hair tied back loosely"]);
+  const color = pick(["black", "dark brown", "chestnut", "auburn", "light brown", "ash brown", "deep red", "dark blue-black"]);
+  const build = pick(["slim", "tall and lanky", "short and sturdy", "broad-shouldered", "average build", "petite"]);
+  const wear = pick(["a mustard raincoat", "a striped long-sleeve shirt", "a navy school uniform", "a green parka",
+    "a white work shirt with rolled sleeves", "an oversized grey hoodie", "a red scarf and a dark wool coat",
+    "a denim jacket", "overalls over a plain tee", "a beige trench coat", "a turtleneck sweater", "a loose flannel shirt"]);
+  return `${who}, ${build}, ${color} ${hair}, wearing ${wear}`;
+}
+
 function fullImagePrompt(i, scenePrompt) {
   const chars = sceneCharacters(i, scenePrompt), main = chars.find((c) => c.main);
   const plan = referencePlan(i, scenePrompt);
@@ -1991,7 +2034,12 @@ function fullImagePrompt(i, scenePrompt) {
     "street, a cup on a table, a phone lying on a bed). The style examples may show people: copy only their drawing " +
     "style, never the people. Wherever the CAMERA SHOT or other rules mention 'the character', apply it to the main " +
     "object or the place instead.");
-  if (!noPeople) parts.push("SAME DESIGN FOR EVERYONE: every person in the image — including extras, crowds, victims and people in the " +
+  if (!noPeople && !chars.length) parts.push("NEW PEOPLE (important): this video has no recurring characters. Anyone " +
+    "in this image is a NEW person invented for this image — never the people from the style examples. Draw them in the " +
+    "art style (same line work, shading and proportions), but give them their own look: their own face, hairstyle, hair " +
+    "color, age, build and clothes, clearly different from everyone in the style examples. The exact person to draw is " +
+    "given under WHO in THIS SCENE below.");
+  else if (!noPeople) parts.push("SAME DESIGN FOR EVERYONE: every person in the image — including extras, crowds, victims and people in the " +
     "background — is drawn with exactly the same simple character design as the style examples and character references " +
     "(characters with their own reference keep THEIR face and hair from it — the generic face from ART STYLE is only for " +
     "everyone else). " +
@@ -2025,12 +2073,17 @@ ${previously}`);
     "outdoors, through windows and open doors, and inside where it fits — always seen from where the characters are " +
     "(from an upstairs window, looking down on it). It wins over the style examples and the previous " +
     "scene images: if they show a cleaner or more normal world, keep their layout but change their condition to match this.");
-  parts.push(`THIS SCENE (draw this moment):\n${scenePrompt.trim()}`);
+  const look = !noPeople && !chars.length ? state.project.scenes[i]?.people_look : "";
+  parts.push(`THIS SCENE (draw this moment):\n${scenePrompt.trim()}` + (look
+    ? `\nWHO (required whenever a person is shown — this exact person, not anyone from the style examples): ${look}. ` +
+      "Keep this age, gender, hair and clothing exactly; if the image shows more than one person, this is the main one."
+    : !noPeople && !chars.length ? "\nWHO: a new person (picked when you click Generate)." : ""));
   parts.push(`CAMERA SHOT: ${SHOTS[shot][1]}` + (prevShot ? ` The previous scene was a ${SHOTS[prevShot][0].toLowerCase()} shot; ` +
     "this one must look clearly different — new camera angle, distance and framing, and new poses that match the action." : ""));
   parts.push(ART.custom_style
-    ? "STYLE LOCK: the camera shot changes only the framing (angle and distance). Keep the drawing style, character design, " +
-      "lighting and color mood exactly as described in ART STYLE and shown in the style examples."
+    ? "STYLE LOCK: the camera shot changes only the framing (angle and distance). Keep the drawing style (how people and " +
+      "things are drawn — not who the people are), lighting and color mood exactly as described in ART STYLE and shown in " +
+      "the style examples."
     : world
     ? "STYLE LOCK: the camera shot changes only the framing (angle and distance). Keep the drawing style (flat shapes, clean " +
       "outlines, simple character design) as in ART STYLE and the style examples — no painterly rendering, blur or photo " +
@@ -2101,6 +2154,8 @@ async function runImageJob(i, scenePrompt, onStage) {
       if (ig.modalIndex === i) updateImagePromptPreview();
     }
   }
+  sc.people_look = randomPeopleLook();     // new people on every generation too
+  markDirty();
   const job = await api("/api/imagegen/jobs", { prompt: fullImagePrompt(i, scenePrompt),
     references: sceneReferences(i, scenePrompt) });
   ig.job = job;
