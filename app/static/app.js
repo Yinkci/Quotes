@@ -1989,6 +1989,12 @@ function choosePlace(i) {
   let pool = all.filter((p) => !usedElsewhere.has(p.text) && !(sc.places_tried || []).includes(p.text));
   if (!pool.length) { sc.places_tried = []; pool = all.filter((p) => !usedElsewhere.has(p.text)); }
   if (!pool.length) pool = all;
+  // "No people" scenes are melancholic outdoor views: never a home, room or other indoor place.
+  if (sc.no_people) {
+    const outdoor = (list) => list.filter((p) => !p.home && !smallIndoor(p.text));
+    pool = outdoor(pool).length ? outdoor(pool) : outdoor(all).length ? outdoor(all) : pool;
+    return pool[Math.floor(Math.random() * pool.length)].text;
+  }
   const homes = scenes.filter((s, k) => k !== i && isHome(k)).length;
   const homeOk = homes < Math.ceil(scenes.length / 3) && !isHome(i - 1) && !isHome(i + 1) && Math.random() < HOME_CHANCE;
   const want = pool.filter((p) => p.home === homeOk);
@@ -2014,7 +2020,9 @@ function randomPeopleLook() {
     "a rust-colored oversized knit sweater", "a dark wool coat and a knit scarf", "a forest-green cable-knit sweater",
     "an oversized pale blue button-up shirt", "a mustard knit cardigan over a white shirt", "a loose oatmeal turtleneck",
     "a long charcoal coat over a cream sweater", "a dusty-rose knit sweater", "a navy cardigan over a white collared shirt"]);
-  return `${who}, ${build}, ${color} hair ${hair}, wearing ${wear}`;
+  // Older people get grey hair, not a second random color ("grey hair ... deep red hair" confused the image tool).
+  const old = who.startsWith("an older");
+  return `${old ? who.replace(" with grey hair", "") : who}, ${build}, ${old ? pick(["grey", "silver-grey", "salt-and-pepper"]) : color} hair ${hair}, wearing ${wear}`;
 }
 
 function fullImagePrompt(i, scenePrompt) {
@@ -2048,7 +2056,12 @@ function fullImagePrompt(i, scenePrompt) {
     "posters or photos. Show the moment only through the place, objects and atmosphere (for example an empty room, a " +
     "street, a cup on a table, a phone lying on a bed). The style examples may show people: copy only their drawing " +
     "style, never the people. Wherever the CAMERA SHOT or other rules mention 'the character', apply it to the main " +
-    "object or the place instead.");
+    "object or the place instead. OUTDOORS AND MELANCHOLIC: this is never an interior, a room or a home — it is a wide, " +
+    "quiet, lonely outdoor view that feels melancholic and nostalgic: an empty road or platform stretching away, a " +
+    "lone street lamp in the rain, a bench under a tree, the sea at dusk, a sky full of stars or drifting clouds, wind " +
+    "in tall grass. Big open sky or distance, soft fading light (dusk, night, rain, mist, snow), a feeling of stillness " +
+    "and longing. The calm center for the caption is part of that view (sky, sea, mist, the far distance), never a " +
+    "blank wall. Everything must be built correctly (lights matching their sources, objects standing properly).");
   if (!noPeople && !chars.length) parts.push("NEW PEOPLE (important): this video has no recurring characters. Anyone " +
     "in this image is a NEW person invented for this image — never the people from the style examples. Draw them in the " +
     "art style (same line work, shading and proportions), but give them their own look: their own face, hairstyle, hair " +
